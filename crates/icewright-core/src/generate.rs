@@ -184,6 +184,13 @@ pub fn generate(ws: &Workspace, out_dir: &Path) -> Result<GenerateReport> {
     }
 
     let cfg = ws.config()?;
+    // 生成适配器按栈分目标实现；未实现的栈必须拒绝，绝不把 python 骨架冒充 java/go 交付。
+    if cfg.workspace.stack != "python" {
+        bail!(
+            "S5 生成暂只支持 stack=python；stack={:?} 的适配器在路线图上，尚未实现，拒绝输出错栈项目",
+            cfg.workspace.stack
+        );
+    }
     // 契约硬闸：技能须逐条人工确认（模型一律输出 pending），未确认技能不进运行时
     let skills_path = ws.artifact_path(crate::extract::SKILLS_ARTIFACT);
     let skills_raw = if skills_path.exists() {
@@ -479,5 +486,21 @@ mod tests {
         let err = generate(&ws, &ws.root.join("output")).unwrap_err();
         assert!(err.to_string().contains("未获人工确认"), "{err}");
         assert!(err.to_string().contains("SK-progress-query"), "{err}");
+    }
+
+    #[test]
+    fn unimplemented_stack_is_rejected() {
+        let ws = setup("stackjava");
+        let cfg_path = ws.root.join("icewright.toml");
+        let raw = std::fs::read_to_string(&cfg_path)
+            .unwrap()
+            .replace("stack = \"python\"", "stack = \"java\"");
+        std::fs::write(&cfg_path, raw).unwrap();
+        let err = generate(&ws, &ws.root.join("output")).unwrap_err();
+        assert!(err.to_string().contains("java"), "{err}");
+        assert!(
+            !ws.root.join("output").join("app/main.py").exists(),
+            "拒绝时不得写出错栈项目"
+        );
     }
 }
