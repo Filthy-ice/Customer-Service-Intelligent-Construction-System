@@ -1,4 +1,5 @@
 pub mod config;
+pub mod model;
 pub mod preflight;
 pub mod secrets;
 pub mod state;

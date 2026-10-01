@@ -33,6 +33,11 @@ enum Cmd {
         #[command(subcommand)]
         action: SecretAction,
     },
+    /// 模型接入探测（最小补全请求验证端点/密钥/模型三件套）
+    Model {
+        #[command(subcommand)]
+        action: ModelAction,
+    },
     /// M0 契约自检：8 份 schema × 内置实例全量校验
     Contract {
         #[command(subcommand)]
@@ -70,6 +75,12 @@ enum ConfigAction {
 enum SecretAction {
     /// 从 stdin 读密钥并存储到 keyring 引用对应位置
     Set { r#ref: String },
+}
+
+#[derive(Subcommand)]
+enum ModelAction {
+    /// 向模型发送一条探测消息并回报延迟与用量
+    Probe { ws: String },
 }
 
 #[derive(Subcommand)]
@@ -224,6 +235,38 @@ fn cmd_pipeline_status(ws_id: &str) -> Result<()> {
     Ok(())
 }
 
+fn cmd_model_probe(ws_id: &str) -> Result<()> {
+    let ws = Workspace::open(ws_id)?;
+    let cfg = ws.require_configured()?;
+    let r = secrets::SecretRef::parse(&cfg.model.key_ref)?;
+    let key = secrets::resolve(&r)?;
+    let out = icewright_core::model::chat(
+        &cfg.model,
+        &key,
+        &[icewright_core::model::ChatMessage::user("接入探测：请只回复 pong")],
+        false,
+        std::time::Duration::from_secs(20),
+    )?;
+    let ok = out.content.to_ascii_lowercase().contains("pong");
+    println!(
+        "  {}  model={}  延迟={:.1}ms  tokens={}/{}",
+        if ok { "PASS" } else { "FAIL" },
+        out.model,
+        out.latency.as_secs_f64() * 1000.0,
+        out.tokens_in.unwrap_or(0),
+        out.tokens_out.unwrap_or(0),
+    );
+    println!(
+        "  回复: {}",
+        out.content.chars().take(80).collect::<String>()
+    );
+    if ok {
+        Ok(())
+    } else {
+        anyhow::bail!("探测未通过：回复中不含 pong（端点可用但模型行为异常）")
+    }
+}
+
 fn cmd_contract_check() -> Result<()> {
     let reports = icewright_artifact::selftest()?;
     let mut failed = 0;
@@ -263,6 +306,9 @@ fn main() -> Result<()> {
         },
         Cmd::Secret { action } => match action {
             SecretAction::Set { r#ref } => cmd_secret_set(r#ref),
+        },
+        Cmd::Model { action } => match action {
+            ModelAction::Probe { ws } => cmd_model_probe(ws),
         },
         Cmd::Contract { action } => match action {
             ContractAction::Check => cmd_contract_check(),
