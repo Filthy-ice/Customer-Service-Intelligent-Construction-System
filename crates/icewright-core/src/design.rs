@@ -55,6 +55,7 @@ pub fn render_design(ws: &Workspace) -> Result<String> {
             "- ⚠ 模型密钥以明文内嵌于配置文件（plain: 引用，客户端界面场景）。请确保该文件权限 0600 且不提交版本库；工程交付建议改用 env:// 或 keyring:// 引用。\n",
         );
     }
+    out.push_str(&framework_section(&cfg)?);
     out.push_str("\n## 2. 领域规则清单\n\n");
     out.push_str("| ID | 类型 | 执行点 | 规则内容 |\n|---|---|---|---|\n");
     for r in rules_arr {
@@ -271,6 +272,7 @@ pub fn render_design(ws: &Workspace) -> Result<String> {
 
     out.push_str("\n## 8. 闸门A 确认须知\n\n");
     out.push_str("- 本文件由引擎确定性渲染；任何产物变更后须重新 `design render` 并再次确认。\n");
+    out.push_str("- 技术栈与\"生成物 Agent 框架选型\"小节代表交付承诺：确认即锁定，S5 按此构建，改动请驳回后重渲染。\n");
     out.push_str("- 确认后进入 S5 代码生成；驳回请附注原因。\n");
     Ok(out)
 }
@@ -281,6 +283,51 @@ fn nv(s: &str) -> &str {
     } else {
         s
     }
+}
+
+/// 生成物 agent 框架选型章节（frameworks 知识库的 2026-10-01 调研快照）。
+/// 栈未填/未收录时返回空串，不打断概览。
+fn framework_section(cfg: &Config) -> Result<String> {
+    let Some(fw) =
+        crate::frameworks::resolve(&cfg.workspace.stack, &cfg.workspace.agent_framework)?
+    else {
+        return Ok(String::new());
+    };
+    let overridden = !cfg.workspace.agent_framework.trim().is_empty();
+    let mut out = String::from("\n### 生成物 Agent 框架选型（调研快照 2026-10-01）\n\n");
+    out.push_str(&format!(
+        "- 选定：{} {}（栈 {}，{}）\n",
+        fw.name,
+        fw.version_line,
+        cfg.workspace.stack,
+        if overridden {
+            "用户覆盖默认"
+        } else {
+            "每栈默认"
+        }
+    ));
+    out.push_str(match fw.integration {
+        crate::frameworks::Integration::Implemented => {
+            "- 集成状态：✅ S5 模板已按该框架构建生成物\n"
+        }
+        crate::frameworks::Integration::Planned => {
+            "- 集成状态：⏳ 模板集成实施中；本选型随闸门A 一并确认，S5 未达该状态绝不谎称交付\n"
+        }
+    });
+    out.push_str("- 覆盖方式：`icewright config set <ws> workspace.agent_framework <候选名>`\n\n");
+    out.push_str("| 候选 | 版本线 | Star | 优势 | 劣势 |\n|---|---|---|---|---|\n");
+    for c in crate::frameworks::candidates(&cfg.workspace.stack) {
+        let mark = if c.name == fw.name { " ★" } else { "" };
+        out.push_str(&format!(
+            "| {}{mark} | {} | {} | {} | {} |\n",
+            c.name,
+            c.version_line,
+            c.stars,
+            c.pros.replace('|', "\\|"),
+            c.cons.replace('|', "\\|")
+        ));
+    }
+    Ok(out)
 }
 
 fn key_ref_display(cfg: &Config) -> String {
@@ -527,6 +574,26 @@ mod tests {
         let md = render_design(&ws).unwrap();
         assert!(!md.contains("尚未人工确认"));
         assert!(!md.contains("⚠status="));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn framework_section_renders_default_and_validates_override() {
+        let (ws, base) = ws_with_rules("framework");
+        let md = render_design(&ws).unwrap();
+        assert!(md.contains("### 生成物 Agent 框架选型"));
+        assert!(md.contains("agentscope"));
+        assert!(md.contains("★"));
+        assert!(md.contains("模板集成实施中"));
+
+        let p = ws.root.join("icewright.toml");
+        crate::config::set_and_save(&p, "workspace.agent_framework", "tensorflow").unwrap();
+        assert!(render_design(&ws).is_err(), "非法候选必须拒绝渲染");
+
+        crate::config::set_and_save(&p, "workspace.agent_framework", "langgraph").unwrap();
+        let md = render_design(&ws).unwrap();
+        assert!(md.contains("用户覆盖默认"));
+        assert!(md.contains("langgraph ★"));
         let _ = std::fs::remove_dir_all(&base);
     }
 }

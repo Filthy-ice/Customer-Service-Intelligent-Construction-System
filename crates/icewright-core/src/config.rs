@@ -18,6 +18,8 @@ pub struct WorkspaceCfg {
     pub stack: String,
     /// CLI 文案语言：zh | en（空或未识别值由调用方回退 zh）
     pub locale: String,
+    /// 生成物 Agent 框架覆盖（空=用每栈默认；值须命中该栈候选，见 frameworks::resolve）
+    pub agent_framework: String,
 }
 
 impl Default for WorkspaceCfg {
@@ -27,6 +29,7 @@ impl Default for WorkspaceCfg {
             pack: String::new(),
             stack: String::new(),
             locale: "zh".to_string(),
+            agent_framework: String::new(),
         }
     }
 }

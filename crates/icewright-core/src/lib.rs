@@ -4,6 +4,7 @@ pub mod delivery;
 pub mod design;
 pub mod evaluate;
 pub mod extract;
+pub mod frameworks;
 pub mod generate;
 pub mod model;
 pub mod preflight;

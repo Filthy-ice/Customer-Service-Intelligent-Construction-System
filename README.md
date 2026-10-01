@@ -10,6 +10,7 @@
 - **契约先行**：所有领域产物均受 JSON Schema（draft 2020-12）约束，跨产物引用做完整性校验（悬空字段/未知流程/未确认接口/失效技能绑定一律拦截）。接口存在性与技能生效均由人工逐条确认（模型一律输出未确认态），未确认接口/技能在 S5 生成阶段被硬闸拒绝；生成项目运行时只装载已确认技能。
 - **生成系统不落业务数据**：会话槽位放 Redis，业务数据运行时实时调用客户核心系统 API（接口契约驱动，支持 mock 回放评测）。自带多语言聊天页面（zh/en 访客可选），固定话术与模型回复均跟随所选语言。
 - **三目标栈生成**：`workspace.stack` 支持 `python`（FastAPI）、`java`（Spring Boot 3 / JDK 21）与 `go`（标准库 net/http + go-redis，领域产物 //go:embed 进二进制），三栈 HTTP 线格式一致（同一聊天页与 curl 冒烟通用）、规则/技能语义逐文件对齐；S2 预检探测对应工具链，S6 按栈分派验证（python 编译+pytest / java Maven compile+test / go build+test）。未实现的栈 S5 明确拒绝、绝不冒充交付。
+- **生成物站在成熟 Agent 框架上**：客服项目不手搓驱动 AI 的框架。引擎内置每栈框架候选与对比表（调研快照 2026-10-01：python 默认 AgentScope、java 默认 Spring AI、go 默认 CloudWeGo Eino，均支持 OpenAI-compatible BYOK 端点），选型随设计文档进闸门A 人工确认，`workspace.agent_framework` 可覆盖；模板未落地集成的框架在设计文档如实标注状态。
 - **可断点续跑**：每个 workspace 独立隔离，状态机可恢复；产物任何变更自动作废已有人工确认，杜绝"批过的设计"与"生成的代码"脱节。
 - **自带模型接入（BYOK）**：任何 OpenAI-compatible 端点均可；供应商目录 + 在线模型发现，接入点与模型名不写死。
 - **双语界面**：构建器 CLI 文案 zh/en 可选（`workspace.locale` 或 `ICERIGHT_LOCALE`）。
