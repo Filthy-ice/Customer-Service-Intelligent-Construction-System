@@ -1,0 +1,8 @@
+/.task
+*.exe
+*.test
+*.out
+.env
+.idea/
+.vscode/
+bin/

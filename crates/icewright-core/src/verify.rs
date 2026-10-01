@@ -37,9 +37,19 @@ const REQUIRED_FILES_JAVA: [&str; 6] = [
     "src/main/resources/static/index.html",
 ];
 
+const REQUIRED_FILES_GO: [&str; 6] = [
+    "go.mod",
+    "main.go",
+    "assets/rules.json",
+    "domain/rules_test.go",
+    "domain/i18n.go",
+    "static/index.html",
+];
+
 fn required_files(stack: &str) -> &'static [&'static str] {
     match stack {
         "java" => REQUIRED_FILES_JAVA.as_slice(),
+        "go" => REQUIRED_FILES_GO.as_slice(),
         _ => REQUIRED_FILES_PY.as_slice(),
     }
 }
@@ -97,13 +107,15 @@ pub fn verify(ws: &Workspace, out_dir: &Path, python: &Path) -> Result<Vec<Check
         },
     ));
 
-    // 编译与测试命令按栈分派：python 用解释器自检，java 走 Maven
+    // 编译与测试命令按栈分派：python 用解释器自检，java 走 Maven，go 走 go build/test
     let (program, compile_args, test_args): (PathBuf, Vec<&str>, Vec<&str>) = if stack == "java" {
         (
             default_maven(),
             vec!["-q", "-DskipTests", "compile"],
             vec!["-q", "test"],
         )
+    } else if stack == "go" {
+        (default_go(), vec!["build", "./..."], vec!["test", "./..."])
     } else {
         (
             python.to_path_buf(),
@@ -188,6 +200,12 @@ pub fn default_maven() -> PathBuf {
     std::env::var("IW_MAVEN")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("mvn"))
+}
+
+pub fn default_go() -> PathBuf {
+    std::env::var("IW_GO")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("go"))
 }
 
 #[cfg(test)]
@@ -319,6 +337,40 @@ mod tests {
             }
         } else {
             // mvn 不可用/依赖下载受阻：按契约记 compile_failed，不推进阶段
+            assert_eq!(s6.status, StageStatus::Failed);
+            assert_eq!(s6.failures[0].kind, "compile_failed");
+        }
+    }
+
+    #[test]
+    fn go_stack_verify_routes_to_gotoolchain_if_available() {
+        // 需要 Go 工具链（IW_GO 指路）；缺工具链时跳过实质断言
+        let gocmd = default_go();
+        if Command::new(&gocmd).arg("version").output().is_err() {
+            return;
+        }
+        let (ws, out) = prepared("gorun");
+        let cfg_path = ws.root.join("icewright.toml");
+        let raw = std::fs::read_to_string(&cfg_path)
+            .unwrap()
+            .replace("stack = \"python\"", "stack = \"go\"");
+        std::fs::write(&cfg_path, raw).unwrap();
+        generate::generate(&ws, &out).unwrap();
+        let checks = verify(&ws, &out, Path::new("python3")).unwrap();
+        let layout = checks.iter().find(|c| c.name == "layout").unwrap();
+        assert!(layout.ok, "go 布局应齐全: {}", layout.detail);
+
+        let st = state::load_state(&ws.state_path()).unwrap();
+        let s6 = st.stage(StageId::S6).unwrap();
+        let compile_ok = checks.iter().find(|c| c.name == "compile").unwrap().ok;
+        if compile_ok {
+            match s6.status {
+                StageStatus::Approved => assert_eq!(st.current_stage, StageId::S7),
+                StageStatus::Failed => assert_eq!(s6.failures[0].kind, "test_failed"),
+                other => panic!("unexpected status {other:?}"),
+            }
+        } else {
+            // go 不可用/依赖下载受阻：按契约记 compile_failed，不推进阶段
             assert_eq!(s6.status, StageStatus::Failed);
             assert_eq!(s6.failures[0].kind, "compile_failed");
         }

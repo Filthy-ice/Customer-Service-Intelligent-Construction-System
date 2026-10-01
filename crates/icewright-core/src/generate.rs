@@ -12,6 +12,9 @@ pub const CUSTOM_MARKER: &str = "ICEWRIGHT-CUSTOM";
 
 const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// go 栈 embed 编译要求 skills.json 恒存在时的默认空表。
+const DEFAULT_SKILLS_JSON: &str = "{\"skills\": []}\n";
+
 /// 目标栈为 python 时的骨架模板（目录结构遵循 docs-internal/12 的阿里 Python 分层）。
 static TEMPLATES_PY: &[(&str, &str)] = &[
     (
@@ -189,11 +192,74 @@ static TEMPLATES_JAVA: &[(&str, &str)] = &[
     ),
 ];
 
-/// 栈 → (模板表, 规则/技能数据嵌入目录)。go 适配器在路线图上，尚未实现。
+/// 目标栈为 go 时的骨架模板（标准库 net/http + go-redis，领域产物经 //go:embed 编进二进制）。
+static TEMPLATES_GO: &[(&str, &str)] = &[
+    ("go.mod", include_str!("../templates/go/go.mod")),
+    ("go.sum", include_str!("../templates/go/go.sum")),
+    ("README.md", include_str!("../templates/go/README.md")),
+    (".env.example", include_str!("../templates/go/.env.example")),
+    (".gitignore", include_str!("../templates/go/.gitignore")),
+    ("main.go", include_str!("../templates/go/main.go")),
+    (
+        "assets/assets.go",
+        include_str!("../templates/go/assets/assets.go"),
+    ),
+    (
+        "config/config.go",
+        include_str!("../templates/go/config/config.go"),
+    ),
+    (
+        "domain/i18n.go",
+        include_str!("../templates/go/domain/i18n.go"),
+    ),
+    (
+        "domain/rules.go",
+        include_str!("../templates/go/domain/rules.go"),
+    ),
+    (
+        "domain/rules_test.go",
+        include_str!("../templates/go/domain/rules_test.go"),
+    ),
+    (
+        "domain/skills.go",
+        include_str!("../templates/go/domain/skills.go"),
+    ),
+    (
+        "domain/skills_test.go",
+        include_str!("../templates/go/domain/skills_test.go"),
+    ),
+    (
+        "domain/i18n_test.go",
+        include_str!("../templates/go/domain/i18n_test.go"),
+    ),
+    (
+        "integration/core_client.go",
+        include_str!("../templates/go/integration/core_client.go"),
+    ),
+    (
+        "service/session.go",
+        include_str!("../templates/go/service/session.go"),
+    ),
+    (
+        "service/chat.go",
+        include_str!("../templates/go/service/chat.go"),
+    ),
+    (
+        "web/handlers.go",
+        include_str!("../templates/go/web/handlers.go"),
+    ),
+    (
+        "static/index.html",
+        include_str!("../templates/go/static/index.html"),
+    ),
+];
+
+/// 栈 → (模板表, 规则/技能数据嵌入目录)。
 fn stack_layout(stack: &str) -> Option<(&'static [(&'static str, &'static str)], &'static str)> {
     match stack {
         "python" => Some((TEMPLATES_PY, "app/data")),
         "java" => Some((TEMPLATES_JAVA, "src/main/resources/data")),
+        "go" => Some((TEMPLATES_GO, "assets")),
         _ => None,
     }
 }
@@ -302,7 +368,7 @@ pub fn generate(ws: &Workspace, out_dir: &Path) -> Result<GenerateReport> {
     // 生成适配器按栈分目标实现；未实现的栈必须拒绝，绝不把 python 骨架冒充 java/go 交付。
     let Some((templates, data_rel)) = stack_layout(&cfg.workspace.stack) else {
         bail!(
-            "S5 生成暂只支持 stack=python|java；stack={:?} 的适配器在路线图上，尚未实现，拒绝输出错栈项目",
+            "S5 生成暂只支持 stack=python|java|go；stack={:?} 的适配器在路线图上，尚未实现，拒绝输出错栈项目",
             cfg.workspace.stack
         );
     };
@@ -377,9 +443,15 @@ pub fn generate(ws: &Workspace, out_dir: &Path) -> Result<GenerateReport> {
     let data_dir = out_dir.join(data_rel);
     std::fs::create_dir_all(&data_dir)?;
     std::fs::write(data_dir.join("rules.json"), &rules_raw)?;
-    if let Some(raw) = &skills_raw {
-        hashed.push(format!("{data_rel}/skills.json\n{raw}"));
-        std::fs::write(data_dir.join("skills.json"), raw)?;
+    // go 栈的 //go:embed 要求 skills.json 物理存在：无技能产物时写出默认空表
+    let skills_effective: &str = match &skills_raw {
+        Some(raw) => raw,
+        None if cfg.workspace.stack == "go" => DEFAULT_SKILLS_JSON,
+        None => "",
+    };
+    if !skills_effective.is_empty() {
+        hashed.push(format!("{data_rel}/skills.json\n{skills_effective}"));
+        std::fs::write(data_dir.join("skills.json"), skills_effective)?;
     }
 
     hashed.sort();
@@ -606,18 +678,70 @@ mod tests {
 
     #[test]
     fn unimplemented_stack_is_rejected() {
-        let ws = setup("stackgo");
+        let ws = setup("stackbogus");
         let cfg_path = ws.root.join("icewright.toml");
         let raw = std::fs::read_to_string(&cfg_path)
             .unwrap()
-            .replace("stack = \"python\"", "stack = \"go\"");
+            .replace("stack = \"python\"", "stack = \"cobol\"");
         std::fs::write(&cfg_path, raw).unwrap();
         let err = generate(&ws, &ws.root.join("output")).unwrap_err();
-        assert!(err.to_string().contains("go"), "{err}");
+        assert!(err.to_string().contains("cobol"), "{err}");
         assert!(
             !ws.root.join("output").join("app/main.py").exists(),
             "拒绝时不得写出错栈项目"
         );
+    }
+
+    #[test]
+    fn go_stack_renders_module_tree() {
+        let ws = setup("stackgotree");
+        let cfg_path = ws.root.join("icewright.toml");
+        let raw: String = std::fs::read_to_string(&cfg_path)
+            .unwrap()
+            .lines()
+            .map(|l| match l {
+                l if l.starts_with("name = ") => "name = \"车险理赔\"",
+                l if l.starts_with("stack = ") => "stack = \"go\"",
+                other => other,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(&cfg_path, raw).unwrap();
+        let out = ws.root.join("output");
+        let report = generate(&ws, &out).unwrap();
+        assert_eq!(report.written.len(), TEMPLATES_GO.len());
+        assert!(
+            !out.join("app/main.py").exists(),
+            "go 栈不得写出 python 骨架"
+        );
+        assert!(!out.join("pom.xml").exists(), "go 栈不得写出 java 骨架");
+
+        let gomod = std::fs::read_to_string(out.join("go.mod")).unwrap();
+        assert!(
+            gomod.contains("module icewright.local/icewright-app"),
+            "中文项目名应回退安全模块路径，got: {gomod}"
+        );
+        assert!(!gomod.contains("{{"), "go.mod 槽位应全部渲染");
+        assert!(out.join("go.sum").exists());
+        assert!(out.join("main.go").exists());
+        assert!(out.join("static/index.html").exists());
+        assert!(
+            out.join("assets/rules.json").exists(),
+            "go 栈规则经 embed 目录进二进制"
+        );
+        assert!(
+            out.join("assets/skills.json").exists(),
+            "无技能产物时也必须写出默认 skills.json，否则 //go:embed 编译失败"
+        );
+        assert_eq!(
+            std::fs::read_to_string(out.join("assets/skills.json")).unwrap(),
+            DEFAULT_SKILLS_JSON
+        );
+
+        // 幂等：再次生成，产物哈希不变
+        let report2 = generate(&ws, &out).unwrap();
+        assert!(report2.preserved.is_empty(), "{:?}", report2.preserved);
+        assert_eq!(report.output_hash, report2.output_hash);
     }
 
     #[test]
