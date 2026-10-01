@@ -273,7 +273,12 @@ mod tests {
 
         let mut st = PipelineState::new(&ws.id, "run-test", Some("insurance/auto-claim@0.1.0"));
         for id in [StageId::S1, StageId::S2, StageId::S3] {
-            approve_stage(&mut st, id, &state::sha256_hex(id.title().as_bytes()), false);
+            approve_stage(
+                &mut st,
+                id,
+                &state::sha256_hex(id.title().as_bytes()),
+                false,
+            );
         }
         approve_stage(
             &mut st,
