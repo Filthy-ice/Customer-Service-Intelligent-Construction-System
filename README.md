@@ -29,6 +29,8 @@ icewright model use my-claim deepseek              # 一键配置接入点/模�
 icewright model probe my-claim                     # 验证端点+密钥+模型三件套
 icewright config set my-claim workspace.pack "insurance/auto-claim@0.1.0"
 icewright pipeline init my-claim
+icewright build my-claim                           # 一键：S2→闸门A/B 顺序推进，闸门处停等确认，确认后重跑续进
+# 以下步骤与 build 等价，可单独执行/重跑：
 icewright pipeline preflight my-claim              # S2 预检
 icewright pipeline extract my-claim                # S3 五类产物提取（校验-修复回环，可 --kinds 增补单类）
 icewright design render my-claim                   # S4 设计文档

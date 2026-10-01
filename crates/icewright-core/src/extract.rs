@@ -633,6 +633,72 @@ pub fn cross_check(
     problems
 }
 
+/// 收集"流程回填/动作引用了但规则侧未定义"的 R id（含出处），供定向补全回喂。
+fn dangling_rule_hints(flows: &Value, rules: &Value) -> Vec<String> {
+    let defined = id_list(Some(rules), Kind::Rules);
+    let mut hints: Vec<String> = Vec::new();
+    let push = |h: String, hints: &mut Vec<String>| {
+        if !hints.contains(&h) {
+            hints.push(h);
+        }
+    };
+    for flow in arr_of(Some(flows), "flows") {
+        let fid = flow["flow"].as_str().unwrap_or("?");
+        for s in arr_of(Some(flow), "states") {
+            let sid = s["id"].as_str().unwrap_or("?");
+            for tr in arr_of(Some(s), "transitions") {
+                if let Some(r) = tr["rule_ref"].as_str() {
+                    if !defined.iter().any(|x| x == r) {
+                        push(
+                            format!(
+                                "{r} ← 流程 {fid}/{sid} 转移「{}」",
+                                tr["on"].as_str().unwrap_or("?")
+                            ),
+                            &mut hints,
+                        );
+                    }
+                }
+            }
+            for a in arr_of(Some(s), "actions") {
+                if let Some(r) = a["rule_ref"].as_str() {
+                    if !defined.iter().any(|x| x == r) {
+                        push(
+                            format!(
+                                "{r} ← 流程 {fid}/{sid} 的 {} 动作",
+                                a["kind"].as_str().unwrap_or("?")
+                            ),
+                            &mut hints,
+                        );
+                    }
+                }
+            }
+        }
+    }
+    hints
+}
+
+/// 收集"流程 skill_call 引用了但技能侧未定义"的 SK id（含出处）。
+fn dangling_skill_hints(flows: &Value, skills: &Value) -> Vec<String> {
+    let defined = id_list(Some(skills), Kind::Skills);
+    let mut hints: Vec<String> = Vec::new();
+    for flow in arr_of(Some(flows), "flows") {
+        let fid = flow["flow"].as_str().unwrap_or("?");
+        for s in arr_of(Some(flow), "states") {
+            let sid = s["id"].as_str().unwrap_or("?");
+            for a in arr_of(Some(s), "actions") {
+                if a["kind"].as_str() == Some("skill_call") {
+                    if let Some(r) = a["ref"].as_str() {
+                        if !defined.iter().any(|x| x == r) && !hints.contains(&r.to_string()) {
+                            hints.push(format!("{r} ← 流程 {fid}/{sid} 的 skill_call 动作"));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    hints
+}
+
 /// 抽取表达式文本中出现的全部 FLD-<ASCII标识符> token。
 fn fld_tokens(expr: &str) -> Vec<String> {
     let mut out = Vec::new();
@@ -748,6 +814,85 @@ pub fn record_s3(ws: &Workspace, corpus: &str, extracted: &[(Kind, Value)]) -> R
     }
     st.updated_at = Some(now);
     state::save_state(&path, &st)?;
+    Ok(())
+}
+
+/// 把"被流程引用但未定义"的 id 回喂给对应提取器定向补齐。
+/// 每轮允诺一次契约修复再问；补齐产物仍不过契约则维持原样，交由 cross_check 报错。
+fn reconcile_dangling_ids<F>(
+    k: Kind,
+    hints: &[String],
+    current: &mut [Option<Value>],
+    extracted: &mut [(Kind, Value)],
+    corpus: &str,
+    chat: &mut F,
+    usage: &mut RunUsage,
+) -> Result<()>
+where
+    F: FnMut(&[ChatMessage]) -> Result<CallOutcome>,
+{
+    let Some(pos) = Kind::ORDER.iter().position(|x| *x == k) else {
+        return Ok(());
+    };
+    let Some(cur) = current[pos].as_ref() else {
+        return Ok(());
+    };
+    let (label, instruction) = match k {
+        Kind::Rules => (
+            "规则",
+            "请把上述被引用但未定义的规则逐个追加为条目：条目必须用左侧 R id 原样作为 id 值，\
+             type/statement/conditions 从引用出处合理归纳；归纳不出可靠条件时 \
+             enforcement_point 用 \"none\"、status 用 pending 作为文档条目兜底，不得改名或另造新 id；\
+             已有条目保持不变，只输出修正后的完整规则 JSON。",
+        ),
+        Kind::Skills => (
+            "技能",
+            "请把上述被引用但未定义的技能逐个追加为条目：条目必须用左侧 SK id 原样作为 id 值，\
+             capability 与字段从引用出处合理归纳，不得发明语料未出现的接口或字段，\
+             status 一律 pending，不得改名或另造新 id；已有条目保持不变，只输出修正后的完整技能 JSON。",
+        ),
+        _ => return Ok(()),
+    };
+    let user = format!(
+        "{corpus}\n\n【当前已提取的{label} JSON】\n{}\n\
+         【已被流程引用、但尚未定义的 id（每行：id ← 引用出处）】\n{}\n\
+         {instruction}",
+        serde_json::to_string(cur)?,
+        hints.join("\n")
+    );
+    let mut messages = vec![
+        ChatMessage::system(&k.system_prompt()?),
+        ChatMessage::user(&user),
+    ];
+    let mut fixed: Option<Value> = None;
+    for _attempt in 0..=1 {
+        let out = chat(&messages)?;
+        usage.add(&out);
+        match parse_and_validate(k, &out.content) {
+            Ok(v) => {
+                fixed = Some(v);
+                break;
+            }
+            Err(errs) => {
+                messages.push(ChatMessage {
+                    role: "assistant".into(),
+                    content: out.content,
+                });
+                messages.push(ChatMessage::user(&format!(
+                    "你上一次的输出未通过 {} 契约校验，错误如下：\n{}\n\
+                     请修正后重新输出完整 JSON（只输出 JSON，不要解释）。",
+                    k.contract(),
+                    errs.join("\n")
+                )));
+            }
+        }
+    }
+    if let Some(v) = fixed {
+        if let Some(slot) = extracted.iter_mut().find(|(ek, _)| *ek == k) {
+            slot.1 = v.clone();
+        }
+        current[pos] = Some(v);
+    }
     Ok(())
 }
 
@@ -888,6 +1033,43 @@ where
                 }
                 None => break,
             }
+        }
+    }
+    // flows 先于 rules/skills 提取，转移回填与 skill_call 引用的是"即将诞生"的 id，
+    // 模型只能自造；按字典对账同一原则定向补全：引用侧不动，被引用侧以原 id 追加条目（最多两轮）。
+    for _round in 0..2 {
+        let rule_hints = match (&current[1], &current[3]) {
+            (Some(f), Some(r)) => dangling_rule_hints(f, r),
+            _ => Vec::new(),
+        };
+        let skill_hints = match (&current[1], &current[4]) {
+            (Some(f), Some(s)) => dangling_skill_hints(f, s),
+            _ => Vec::new(),
+        };
+        if rule_hints.is_empty() && skill_hints.is_empty() {
+            break;
+        }
+        if !rule_hints.is_empty() {
+            reconcile_dangling_ids(
+                Kind::Rules,
+                &rule_hints,
+                &mut current,
+                &mut extracted,
+                &corpus,
+                &mut chat,
+                &mut usage,
+            )?;
+        }
+        if !skill_hints.is_empty() {
+            reconcile_dangling_ids(
+                Kind::Skills,
+                &skill_hints,
+                &mut current,
+                &mut extracted,
+                &corpus,
+                &mut chat,
+                &mut usage,
+            )?;
         }
     }
     let problems = cross_check(
@@ -1262,6 +1444,79 @@ mod tests {
         for f in &declared {
             assert!(ids.contains(f), "补全后字典应包含 {f}");
         }
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn run_reconciles_flows_dangling_rule_and_skill_refs() {
+        let base = std::env::temp_dir().join(format!("iw-ex-flowfix-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let ws = Workspace::create_at(&base, "flowfix").unwrap();
+        std::fs::write(ws.root.join("corpus/规则.md"), "语料").unwrap();
+        let st0 = state::PipelineState::new("flowfix", "run-20261001-0010", None);
+        state::save_state(&ws.state_path(), &st0).unwrap();
+        // 流程早于 rules/skills 提取：回填与 skill_call 引用了尚未问世的 id，模型只能自造
+        let mut flows: Value = serde_json::from_str(&sample(Kind::Flows)).unwrap();
+        flows["flows"][0]["states"][0]["transitions"][0]["rule_ref"] =
+            serde_json::json!("R-auto-fix");
+        {
+            let s0 = &mut flows["flows"][0]["states"][0];
+            if !s0["actions"].is_array() {
+                s0["actions"] = serde_json::json!([]);
+            }
+            s0["actions"]
+                .as_array_mut()
+                .unwrap()
+                .push(serde_json::json!(
+                    { "kind": "skill_call", "ref": "SK-auto-fix" }
+                ));
+        }
+        let mut rec_rules = 0usize;
+        let mut rec_skills = 0usize;
+        let mut chat = |msgs: &[ChatMessage]| -> Result<CallOutcome> {
+            let sys = &msgs[0].content;
+            let last = &msgs[msgs.len() - 1].content;
+            if last.contains("已被流程引用、但尚未定义的 id") {
+                if sys.contains("行业规则提取器") {
+                    rec_rules += 1;
+                    let mut rules: Value = serde_json::from_str(&sample(Kind::Rules)).unwrap();
+                    let mut extra = rules["rules"][0].clone();
+                    extra["id"] = serde_json::json!("R-auto-fix");
+                    rules["rules"].as_array_mut().unwrap().push(extra);
+                    return Ok(canned_out(rules.to_string()));
+                }
+                if sys.contains("技能绑定提取器") {
+                    rec_skills += 1;
+                    let mut skills: Value = serde_json::from_str(&sample(Kind::Skills)).unwrap();
+                    let mut extra = skills["skills"][0].clone();
+                    extra["id"] = serde_json::json!("SK-auto-fix");
+                    skills["skills"].as_array_mut().unwrap().push(extra);
+                    return Ok(canned_out(skills.to_string()));
+                }
+            }
+            if sys.contains("对话流程") {
+                return Ok(canned_out(flows.to_string()));
+            }
+            canned_chat(msgs)
+        };
+        let st = run(&ws, &Kind::ORDER, &mut chat).unwrap();
+        assert_eq!(rec_rules, 1, "规则侧应恰好触发一次定向补全");
+        assert_eq!(rec_skills, 1, "技能侧应恰好触发一次定向补全");
+        // 7 次调用 = 五类各 1 + 规则补全 1 + 技能补全 1
+        let u = st.stage(StageId::S3).unwrap().usage.clone().unwrap();
+        assert_eq!(u.tokens_in, Some(700));
+        assert_eq!(u.tokens_out, Some(280));
+        assert_eq!(st.stage(StageId::S3).unwrap().status, StageStatus::Approved);
+        let rules_disk: Value = serde_json::from_str(
+            &std::fs::read_to_string(ws.artifact_path(RULES_ARTIFACT)).unwrap(),
+        )
+        .unwrap();
+        assert!(id_list(Some(&rules_disk), Kind::Rules).contains(&"R-auto-fix".to_string()));
+        let skills_disk: Value = serde_json::from_str(
+            &std::fs::read_to_string(ws.artifact_path(SKILLS_ARTIFACT)).unwrap(),
+        )
+        .unwrap();
+        assert!(id_list(Some(&skills_disk), Kind::Skills).contains(&"SK-auto-fix".to_string()));
         let _ = std::fs::remove_dir_all(&base);
     }
 

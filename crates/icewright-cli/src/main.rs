@@ -26,6 +26,8 @@ enum Cmd {
         #[command(subcommand)]
         action: PipelineAction,
     },
+    /// 一键流水线：S1 自动初始化，顺序推进到最近的人类闸门（闸门A/闸门B）停等确认，确认后重跑续进
+    Build { ws: String },
     /// workspace 配置读写（model.base_url、model.key_ref 等点号键）
     Config {
         #[command(subcommand)]
@@ -385,24 +387,59 @@ fn cmd_pipeline_extract(ws_id: &str, kinds: &[String]) -> Result<()> {
         .into_iter()
         .filter(|k| selected.contains(k))
         .collect::<Vec<_>>();
+    let (cfg, key) = model_channel(&ws)?;
+    let st =
+        icewright_core::extract::run(&ws, &selected, |msgs| chat_call(&cfg.model, &key, msgs))?;
+    print_extract_summary(&ws, &selected, &st)?;
+    println!(
+        "{}",
+        tf(
+            "extract_done",
+            &[
+                ("n", &selected.len().to_string()),
+                ("stage", &format!("{:?}", st.current_stage))
+            ]
+        )
+    );
+    println!("{}", tf("extract_next", &[("ws", ws_id)]));
+    Ok(())
+}
+
+/// 按 workspace 配置打开模型通道：完整配置 + 解析后的明文密钥。
+fn model_channel(ws: &Workspace) -> Result<(icewright_core::config::Config, String)> {
     let cfg = ws.require_configured()?;
     let key = secrets::resolve(&secrets::SecretRef::parse(&cfg.model.key_ref)?)?;
-    let st = icewright_core::extract::run(&ws, &selected, |msgs| {
-        icewright_core::model::chat(
-            &cfg.model,
-            &key,
-            msgs,
-            false,
-            std::time::Duration::from_secs(120),
-        )
-        .map(|o| icewright_core::extract::CallOutcome {
-            content: o.content,
-            model: Some(o.model),
-            tokens_in: o.tokens_in,
-            tokens_out: o.tokens_out,
-        })
-    })?;
-    for k in &selected {
+    Ok((cfg, key))
+}
+
+/// S3 提取用的统一模型调用：120s 超时，把 ChatOutcome 映射为提取侧 CallOutcome。
+fn chat_call(
+    model_cfg: &icewright_core::config::ModelCfg,
+    key: &str,
+    msgs: &[icewright_core::model::ChatMessage],
+) -> Result<icewright_core::extract::CallOutcome> {
+    let o = icewright_core::model::chat(
+        model_cfg,
+        key,
+        msgs,
+        false,
+        std::time::Duration::from_secs(120),
+    )?;
+    Ok(icewright_core::extract::CallOutcome {
+        content: o.content,
+        model: Some(o.model),
+        tokens_in: o.tokens_in,
+        tokens_out: o.tokens_out,
+    })
+}
+
+/// 打印各类产物条目数与 S3 累计用量（extract 与 build 共用）。
+fn print_extract_summary(
+    ws: &Workspace,
+    kinds: &[icewright_core::extract::Kind],
+    st: &state::PipelineState,
+) -> Result<()> {
+    for k in kinds {
         let v: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(ws.artifact_path(k.file()))?)?;
         let n = v[k.id_keys().0].as_array().map(|a| a.len()).unwrap_or(0);
@@ -436,17 +473,6 @@ fn cmd_pipeline_extract(ws_id: &str, kinds: &[String]) -> Result<()> {
             )
         );
     }
-    println!(
-        "{}",
-        tf(
-            "extract_done",
-            &[
-                ("n", &selected.len().to_string()),
-                ("stage", &format!("{:?}", st.current_stage))
-            ]
-        )
-    );
-    println!("{}", tf("extract_next", &[("ws", ws_id)]));
     Ok(())
 }
 
@@ -500,6 +526,158 @@ fn cmd_pipeline_status(ws_id: &str) -> Result<()> {
             usage
         );
     }
+    Ok(())
+}
+
+/// 某阶段是否已批准（无记录视为未批准）。
+fn stage_approved(st: &state::PipelineState, id: state::StageId) -> bool {
+    st.stage(id)
+        .map(|s| s.status == state::StageStatus::Approved)
+        .unwrap_or(false)
+}
+
+/// 一键流水线：S1 缺失自动初始化，S2→S7 顺序推进；
+/// 到人类闸门（A/B）未确认即停并提示确认命令，确认后重跑从断点续进。
+fn cmd_build(ws_id: &str) -> Result<()> {
+    use icewright_core::extract::Kind;
+    let ws = open_ws(ws_id)?;
+    // S1：无 pipeline 时自动初始化
+    if !ws.state_path().exists() {
+        let cfg = ws.config()?;
+        let date = Utc::now().format("%Y%m%d").to_string();
+        let run_id = next_run_id(&ws.root, &date);
+        let pack = if cfg.workspace.pack.trim().is_empty() {
+            None
+        } else {
+            Some(cfg.workspace.pack.as_str())
+        };
+        let st = state::PipelineState::new(ws_id, &run_id, pack);
+        state::save_state(&ws.state_path(), &st)?;
+        println!("{}", tf("build_init", &[("run", &run_id)]));
+    }
+    let mut st = state::load_state(&ws.state_path())?;
+
+    // S2 环境预检
+    if stage_approved(&st, state::StageId::S2) {
+        println!("{}", tf("build_already", &[("stage", "S2")]));
+    } else {
+        println!("{}", t("build_s2"));
+        let sroot = secrets::secrets_root()?;
+        let (checks, all_ok) = icewright_core::preflight::run_and_record(&ws, &sroot)?;
+        for c in &checks {
+            println!(
+                "  {}  {:<15} {}",
+                if c.ok { "PASS" } else { "FAIL" },
+                c.name,
+                c.detail
+            );
+        }
+        if !all_ok {
+            anyhow::bail!("{}", t("preflight_fail"));
+        }
+        st = state::load_state(&ws.state_path())?;
+    }
+
+    // S3 五类产物提取（真实模型调用，计入用量账本）
+    if stage_approved(&st, state::StageId::S3) {
+        println!("{}", tf("build_already", &[("stage", "S3")]));
+    } else {
+        println!("{}", t("build_s3"));
+        let (cfg, key) = model_channel(&ws)?;
+        st = icewright_core::extract::run(&ws, &Kind::ORDER, |msgs| {
+            chat_call(&cfg.model, &key, msgs)
+        })?;
+        print_extract_summary(&ws, &Kind::ORDER, &st)?;
+    }
+
+    // S4 设计文档渲染 + 闸门A
+    // 闸门A 已生效时不再重渲染：publish 会作废旧确认，build 的可重入性优先
+    if st.gate_is_current(state::StageId::S4) {
+        println!("{}", tf("build_already", &[("stage", "S4/闸门A")]));
+    } else {
+        println!("{}", t("build_s4"));
+        let had_design = ws
+            .artifact_path(icewright_core::design::DESIGN_DOC)
+            .exists();
+        let (path, changed) = icewright_core::design::publish(&ws)?;
+        println!("{}", tf("design_rendered", &[("path", &path)]));
+        if changed && had_design {
+            println!("{}", t("gate_a_void"));
+        }
+        st = state::load_state(&ws.state_path())?;
+        if !st.gate_is_current(state::StageId::S4) {
+            println!("{}", tf("build_gate_a", &[("ws", ws_id)]));
+            return Ok(());
+        }
+    }
+
+    // S5 代码生成
+    let out_dir = ws.root.join("output");
+    if stage_approved(&st, state::StageId::S5) {
+        println!("{}", tf("build_already", &[("stage", "S5")]));
+    } else {
+        println!("{}", t("build_s5"));
+        let report = icewright_core::generate::generate(&ws, &out_dir)?;
+        println!(
+            "{}",
+            tf(
+                "gen_done",
+                &[
+                    ("n", &report.written.len().to_string()),
+                    ("dir", &report.out_dir.display().to_string()),
+                    ("hash", &report.output_hash[7..15]),
+                ]
+            )
+        );
+        for f in &report.preserved {
+            println!("{}", tf("gen_preserved", &[("f", f)]));
+        }
+        st = state::load_state(&ws.state_path())?;
+    }
+
+    // S6 自动验证
+    if stage_approved(&st, state::StageId::S6) {
+        println!("{}", tf("build_already", &[("stage", "S6")]));
+    } else {
+        println!("{}", t("build_s6"));
+        let checks = icewright_core::verify::verify(
+            &ws,
+            &out_dir,
+            &icewright_core::verify::default_python(),
+        )?;
+        for c in &checks {
+            println!(
+                "  {}  {:<10} {}",
+                if c.ok { "PASS" } else { "FAIL" },
+                c.name,
+                c.detail.chars().take(120).collect::<String>()
+            );
+        }
+        if !checks.iter().all(|c| c.ok) {
+            anyhow::bail!("{}", tf("verify_fail", &[("ws", ws_id)]));
+        }
+    }
+
+    // S7 交付报告渲染 + 闸门B（闸门B 已生效时不再重渲染，理由同 S4）
+    if st.gate_is_current(state::StageId::S7) {
+        println!("{}", t("build_done"));
+        return Ok(());
+    }
+    println!("{}", t("build_s7"));
+    let had_delivery = ws
+        .artifact_path(icewright_core::delivery::DELIVERY_DOC)
+        .exists();
+    let (path, changed) = icewright_core::delivery::publish(&ws)?;
+    println!("{}", tf("delivery_rendered", &[("path", &path)]));
+    if changed && had_delivery {
+        println!("{}", t("gate_b_void"));
+    }
+    st = state::load_state(&ws.state_path())?;
+    if !st.gate_is_current(state::StageId::S7) {
+        println!("{}", tf("build_gate_b", &[("ws", ws_id)]));
+        return Ok(());
+    }
+    println!("{}", t("build_done"));
     Ok(())
 }
 
@@ -973,6 +1151,7 @@ fn main() -> Result<()> {
             PipelineAction::Extract { ws, kinds } => cmd_pipeline_extract(ws, kinds),
             PipelineAction::Status { ws } => cmd_pipeline_status(ws),
         },
+        Cmd::Build { ws } => cmd_build(ws),
         Cmd::Config { action } => match action {
             ConfigAction::Show { ws } => cmd_config_show(ws),
             ConfigAction::Set { ws, key, value } => cmd_config_set(ws, key, value),
