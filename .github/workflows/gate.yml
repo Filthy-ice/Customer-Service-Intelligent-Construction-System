@@ -15,6 +15,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      # 生成栈工具链：go 按 .go-version 显式安装（S6 go 验证测试需要）；
+      # java/maven/python3 用 ubuntu-latest 镜像自带版本
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: .go-version
       - name: fmt check
         run: cargo fmt --all --check
       - name: clippy (deny warnings)
