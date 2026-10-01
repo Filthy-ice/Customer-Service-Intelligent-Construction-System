@@ -59,6 +59,8 @@ enum PipelineAction {
     Init { ws: String },
     /// S2 环境预检（语料/模型端点/密钥/stack/行业包），结论写回状态
     Preflight { ws: String },
+    /// S3 领域规则提取（契约校验 + 修复回环），产物 artifacts/rules.json
+    Extract { ws: String },
     /// 打印某 workspace 的 pipeline 状态表
     Status { ws: String },
 }
@@ -202,6 +204,37 @@ fn cmd_pipeline_preflight(ws_id: &str) -> Result<()> {
     }
 }
 
+fn cmd_pipeline_extract(ws_id: &str) -> Result<()> {
+    let ws = Workspace::open(ws_id)?;
+    if !ws.state_path().exists() {
+        anyhow::bail!("请先 `icewright pipeline init {ws_id}`");
+    }
+    let st_before = state::load_state(&ws.state_path())?;
+    if st_before.stage(state::StageId::S2).unwrap().status
+        != state::StageStatus::Approved
+    {
+        anyhow::bail!("S2 预检未通过，禁止进入 S3：先运行 `icewright pipeline preflight {ws_id}`");
+    }
+    let cfg = ws.require_configured()?;
+    let key = secrets::resolve(&secrets::SecretRef::parse(&cfg.model.key_ref)?)?;
+    let st = icewright_core::extract::run(&ws, |msgs| {
+        icewright_core::model::chat(&cfg.model, &key, msgs, false, std::time::Duration::from_secs(120))
+            .map(|o| o.content)
+    })?;
+    let rules: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(ws.artifact_path(
+            icewright_core::extract::RULES_ARTIFACT,
+        ))?)?;
+    let n = rules["rules"].as_array().map(|a| a.len()).unwrap_or(0);
+    println!(
+        "S3 完成：提取 {n} 条规则 → {}；当前阶段 {:?}",
+        ws.artifact_path(icewright_core::extract::RULES_ARTIFACT).display(),
+        st.current_stage
+    );
+    println!("下一步：`icewright design render {ws_id}` 生成设计文档供闸门A确认");
+    Ok(())
+}
+
 fn cmd_pipeline_status(ws_id: &str) -> Result<()> {
     let ws = Workspace::open(ws_id)?;
     let path = ws.state_path();
@@ -298,6 +331,7 @@ fn main() -> Result<()> {
         Cmd::Pipeline { action } => match action {
             PipelineAction::Init { ws } => cmd_pipeline_init(ws),
             PipelineAction::Preflight { ws } => cmd_pipeline_preflight(ws),
+            PipelineAction::Extract { ws } => cmd_pipeline_extract(ws),
             PipelineAction::Status { ws } => cmd_pipeline_status(ws),
         },
         Cmd::Config { action } => match action {

@@ -16,3 +16,4 @@ chrono.workspace = true
 clap.workspace = true
 icewright-artifact = { path = "../icewright-artifact" }
 icewright-core = { path = "../icewright-core" }
+serde_json.workspace = true

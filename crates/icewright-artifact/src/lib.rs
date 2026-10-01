@@ -93,6 +93,26 @@ pub fn example(name: &str) -> Result<Value> {
     Ok(serde_json::from_str(src)?)
 }
 
+pub fn schema_src(name: &str) -> Result<&'static str> {
+    CONTRACT_DIRS
+        .iter()
+        .find(|(n, _, _)| *n == name)
+        .map(|(_, schema, _)| *schema)
+        .with_context(|| format!("unknown contract {name}"))
+}
+
+/// 按契约名校验任意实例；返回空向量 = 通过。
+pub fn validate_instance(name: &str, instance: &Value) -> Result<Vec<String>> {
+    let schema: Value = serde_json::from_str(schema_src(name)?)?;
+    let mut options = ValidationOptions::default();
+    options.should_validate_formats(true);
+    let validator = options.build(&schema)?;
+    Ok(match validator.validate(instance) {
+        Ok(()) => Vec::new(),
+        Err(e) => vec![e.to_string()],
+    })
+}
+
 pub struct CheckReport {
     pub name: &'static str,
     pub ok: bool,
