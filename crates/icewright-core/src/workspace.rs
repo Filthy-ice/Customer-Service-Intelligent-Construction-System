@@ -13,6 +13,9 @@ locale = "zh"      # CLI 文案语言：zh | en（临时覆盖用环境变量 IC
 base_url = ""      # OpenAI-compatible 端点；`icewright model use <ws> <provider>` 从目录自动填
 model = ""         # 默认模型；`icewright model discover <provider>` 看在线可用名
 key_ref = ""       # 密钥引用：keyring://（软件代存）| env://VAR（用户自配环境变量）| plain:（明文，界面用）
+# 单价（每百万 token）：两项都填才估算 S3 费用，留空只记 token 账
+#price_in_per_mtok = 1.0
+#price_out_per_mtok = 2.0
 
 [model.routing]
 # extract = "strong-model"   # S3 规则提取

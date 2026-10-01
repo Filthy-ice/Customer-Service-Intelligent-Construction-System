@@ -136,6 +136,8 @@ mod tests {
             model: "m1".into(),
             key_ref: "keyring://t/t".into(),
             routing: Default::default(),
+            price_in_per_mtok: None,
+            price_out_per_mtok: None,
         }
     }
 

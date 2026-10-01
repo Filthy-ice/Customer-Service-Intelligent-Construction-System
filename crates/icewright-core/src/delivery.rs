@@ -60,20 +60,32 @@ fn render_report(ws: &Workspace, cfg: &Config, st: &state::PipelineState) -> Res
     ));
 
     out.push_str(
-        "## 1. 阶段轨迹\n\n| 阶段 | 名称 | 状态 | 产物哈希 | 闸门 |\n|---|---|---|---|---|\n",
+        "## 1. 阶段轨迹\n\n| 阶段 | 名称 | 状态 | 产物哈希 | 闸门 | 模型用量（in/out tokens·费用） |\n|---|---|---|---|---|---|\n",
     );
     for s in &st.stages {
         let gate = match &s.gate {
             Some(g) => format!("{:?}·{}", g.decision, g.by),
             None => "-".into(),
         };
+        let usage = match &s.usage {
+            Some(u) => format!(
+                "{} / {}{}",
+                u.tokens_in.unwrap_or(0),
+                u.tokens_out.unwrap_or(0),
+                u.cost_estimate
+                    .map(|c| format!(" · {c:.4}"))
+                    .unwrap_or_default()
+            ),
+            None => "-".into(),
+        };
         out.push_str(&format!(
-            "| {:?} | {} | {:?} | {} | {} |\n",
+            "| {:?} | {} | {:?} | {} | {} | {} |\n",
             s.id,
             s.id.title(),
             s.status,
             short(s.output_hash.as_ref()),
-            gate
+            gate,
+            usage
         ));
     }
 

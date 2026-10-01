@@ -38,6 +38,9 @@ pub struct ModelCfg {
     pub model: String,
     pub key_ref: String,
     pub routing: RoutingCfg,
+    /// 单价（每百万 token），用于 S3 用量入账的 cost_estimate；两者缺一则不估算费用
+    pub price_in_per_mtok: Option<f64>,
+    pub price_out_per_mtok: Option<f64>,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]

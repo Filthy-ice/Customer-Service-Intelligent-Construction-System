@@ -13,6 +13,66 @@ pub const APIS_ARTIFACT: &str = "apis.json";
 pub const SKILLS_ARTIFACT: &str = "skills.json";
 const MAX_CORPUS_BYTES: u64 = 512 * 1024;
 
+/// 一次模型调用的回传：除 JSON 正文外还须带回端点用量，供 S3 精确入账
+/// （不回报 usage 的端点给 None，记 0 但调用次数照记）。
+#[derive(Debug, Clone, Default)]
+pub struct CallOutcome {
+    pub content: String,
+    pub model: Option<String>,
+    pub tokens_in: Option<u64>,
+    pub tokens_out: Option<u64>,
+}
+
+impl From<String> for CallOutcome {
+    fn from(content: String) -> Self {
+        Self {
+            content,
+            model: None,
+            tokens_in: None,
+            tokens_out: None,
+        }
+    }
+}
+
+/// 一轮 run 内的模型消耗累计（修复回环、对账回喂与五类产物全部计入）。
+#[derive(Debug, Clone, Default)]
+pub struct RunUsage {
+    pub model: Option<String>,
+    pub calls: u32,
+    pub tokens_in: u64,
+    pub tokens_out: u64,
+}
+
+impl RunUsage {
+    fn add(&mut self, out: &CallOutcome) {
+        self.calls += 1;
+        if out.model.is_some() {
+            self.model = out.model.clone();
+        }
+        self.tokens_in += out.tokens_in.unwrap_or(0);
+        self.tokens_out += out.tokens_out.unwrap_or(0);
+    }
+
+    fn absorb(&mut self, other: RunUsage) {
+        self.calls += other.calls;
+        if other.model.is_some() {
+            self.model = other.model;
+        }
+        self.tokens_in += other.tokens_in;
+        self.tokens_out += other.tokens_out;
+    }
+
+    /// 单价两项都配置才估算费用；宁缺不猜。
+    fn cost_estimate(&self, price_in: Option<f64>, price_out: Option<f64>) -> Option<f64> {
+        match (price_in, price_out) {
+            (Some(pi), Some(po)) => {
+                Some(self.tokens_in as f64 * pi / 1e6 + self.tokens_out as f64 * po / 1e6)
+            }
+            _ => None,
+        }
+    }
+}
+
 /// S3 领域的五类产物。ORDER 即依赖顺序：apis → flows → dictionary → rules → skills，
 /// 后提取者的提示词里注入前提取物的 id 白名单，从源头减少悬空引用。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -159,15 +219,16 @@ pub fn parse_and_validate(kind: Kind, raw: &str) -> std::result::Result<Value, V
 
 /// 校验-修复回环：最多 max_repairs 次把错误清单回喂模型重生成。
 /// known_ids 非空时作为白名单附加进用户消息，约束跨产物引用。
+/// 返回值同时带回本轮全部模型调用的用量账（含失败重试）。
 pub fn extract_artifact<F>(
     kind: Kind,
     corpus: &str,
     known_ids: &str,
     max_repairs: u32,
     mut chat: F,
-) -> Result<Value>
+) -> Result<(Value, RunUsage)>
 where
-    F: FnMut(&[ChatMessage]) -> Result<String>,
+    F: FnMut(&[ChatMessage]) -> Result<CallOutcome>,
 {
     let user = if known_ids.trim().is_empty() {
         corpus.to_string()
@@ -181,15 +242,17 @@ where
         ChatMessage::user(&user),
     ];
     let mut last_errs = Vec::new();
+    let mut usage = RunUsage::default();
     for _attempt in 0..=max_repairs {
-        let raw = chat(&messages)?;
-        match parse_and_validate(kind, &raw) {
-            Ok(v) => return Ok(v),
+        let out = chat(&messages)?;
+        usage.add(&out);
+        match parse_and_validate(kind, &out.content) {
+            Ok(v) => return Ok((v, usage)),
             Err(errs) => {
                 last_errs = errs.clone();
                 messages.push(ChatMessage {
                     role: "assistant".into(),
-                    content: raw,
+                    content: out.content,
                 });
                 messages.push(ChatMessage::user(&format!(
                     "你上一次的输出未通过 {} 契约校验，错误如下：\n{}\n\
@@ -692,11 +755,12 @@ pub fn record_s3(ws: &Workspace, corpus: &str, extracted: &[(Kind, Value)]) -> R
 /// 交叉引用校验 → 落盘并推进 S3。chat 回调注入便于离线测试。
 pub fn run<F>(ws: &Workspace, kinds: &[Kind], mut chat: F) -> Result<PipelineState>
 where
-    F: FnMut(&[ChatMessage]) -> Result<String>,
+    F: FnMut(&[ChatMessage]) -> Result<CallOutcome>,
 {
     let corpus = load_corpus(&ws.root)?;
     let mut extracted: Vec<(Kind, Value)> = Vec::new();
     let mut current: Vec<Option<Value>> = vec![None; Kind::ORDER.len()];
+    let mut usage = RunUsage::default();
     for k in Kind::ORDER {
         let pos = Kind::ORDER.iter().position(|x| *x == k).unwrap_or(0);
         if !kinds.contains(&k) {
@@ -754,7 +818,8 @@ where
                 s
             }
         };
-        let value = extract_artifact(k, &corpus, &known_ids, 2, &mut chat)?;
+        let (value, kind_usage) = extract_artifact(k, &corpus, &known_ids, 2, &mut chat)?;
+        usage.absorb(kind_usage);
         current[pos] = Some(value.clone());
         extracted.push((k, value));
     }
@@ -793,8 +858,9 @@ where
             ];
             let mut fixed: Option<Value> = None;
             for _attempt in 0..=1 {
-                let raw = chat(&messages)?;
-                match parse_and_validate(Kind::Dictionary, &raw) {
+                let out = chat(&messages)?;
+                usage.add(&out);
+                match parse_and_validate(Kind::Dictionary, &out.content) {
                     Ok(v) => {
                         fixed = Some(v);
                         break;
@@ -802,7 +868,7 @@ where
                     Err(errs) => {
                         messages.push(ChatMessage {
                             role: "assistant".into(),
-                            content: raw,
+                            content: out.content,
                         });
                         messages.push(ChatMessage::user(&format!(
                             "你上一次的输出未通过 {} 契约校验，错误如下：\n{}\n\
@@ -841,6 +907,25 @@ where
         bail!("--kind 未匹配任何产物类型");
     }
     record_s3(ws, &corpus, &extracted)?;
+    // 用量入账放在落盘成功之后：失败轮次的消耗不计入完成提取的账
+    if usage.calls > 0 {
+        let cfg = ws.config()?;
+        let path = ws.state_path();
+        let mut st = state::load_state(&path)?;
+        let cost = usage.cost_estimate(cfg.model.price_in_per_mtok, cfg.model.price_out_per_mtok);
+        state::record_stage_usage(
+            &mut st,
+            StageId::S3,
+            state::StageUsage {
+                model: usage.model,
+                tokens_in: Some(usage.tokens_in),
+                tokens_out: Some(usage.tokens_out),
+                cost_estimate: cost,
+            },
+        )?;
+        st.updated_at = Some(Utc::now());
+        state::save_state(&path, &st)?;
+    }
     state::load_state(&ws.state_path())
 }
 
@@ -855,8 +940,18 @@ mod tests {
             .to_string()
     }
 
+    /// canned 模型的回传：固定伪造用量，验证入账确定性。
+    fn canned_out(json: String) -> CallOutcome {
+        CallOutcome {
+            content: json,
+            model: Some("canned-1".into()),
+            tokens_in: Some(100),
+            tokens_out: Some(40),
+        }
+    }
+
     /// 按 system prompt 中的角色词分派的 canned 模型——离线复现五类提取。
-    fn canned_chat(msgs: &[ChatMessage]) -> Result<String> {
+    fn canned_chat(msgs: &[ChatMessage]) -> Result<CallOutcome> {
         let sys = &msgs[0].content;
         let out = if sys.contains("接口契约提取器") {
             sample(Kind::Apis)
@@ -871,7 +966,7 @@ mod tests {
         } else {
             unreachable!("未知提取角色")
         };
-        Ok(out)
+        Ok(canned_out(out))
     }
 
     #[test]
@@ -901,24 +996,31 @@ mod tests {
     #[test]
     fn repair_loop_recovers_on_second_try() {
         let mut n = 0;
-        let out = extract_artifact(Kind::Rules, "语料", "", 2, |msgs| {
+        let (out, usage) = extract_artifact(Kind::Rules, "语料", "", 2, |msgs| {
             n += 1;
             if n == 1 {
                 assert_eq!(msgs.len(), 2);
-                Ok("{}".to_string())
+                Ok("{}".to_string().into())
             } else {
                 assert_eq!(msgs.len(), 4);
-                Ok(sample(Kind::Rules))
+                Ok(canned_out(sample(Kind::Rules)))
             }
         })
         .unwrap();
         assert!(out["rules"].is_array());
         assert_eq!(n, 2);
+        // 失败重试的消耗同样入账
+        assert_eq!(usage.calls, 2);
+        assert_eq!(usage.tokens_in, 100);
+        assert_eq!(usage.tokens_out, 40);
     }
 
     #[test]
     fn repair_loop_gives_up_after_budget() {
-        let e = extract_artifact(Kind::Rules, "语料", "", 1, |_| Ok("{}".to_string())).unwrap_err();
+        let e = extract_artifact(Kind::Rules, "语料", "", 1, |_| {
+            Ok("{}".to_string().into())
+        })
+        .unwrap_err();
         assert!(e.to_string().contains("连续 2 次"));
     }
 
@@ -927,7 +1029,7 @@ mod tests {
         let mut seen = String::new();
         extract_artifact(Kind::Rules, "语料", "FLD-*: FLD-a, FLD-b", 0, |msgs| {
             seen = msgs[1].content.clone();
-            Ok(sample(Kind::Rules))
+            Ok(canned_out(sample(Kind::Rules)))
         })
         .unwrap();
         assert!(seen.contains("白名单"));
@@ -1087,7 +1189,7 @@ mod tests {
         state::save_state(&ws.state_path(), &st0).unwrap();
 
         let mut dict_user_msgs = Vec::new();
-        let mut chat = |msgs: &[ChatMessage]| -> Result<String> {
+        let mut chat = |msgs: &[ChatMessage]| -> Result<CallOutcome> {
             if msgs[0].content.contains("字段字典提取器") {
                 dict_user_msgs.push(msgs[msgs.len() - 1].content.clone());
             }
@@ -1131,15 +1233,15 @@ mod tests {
         let short_raw = short_dict.to_string();
 
         let mut rec_seen = 0usize;
-        let mut chat = |msgs: &[ChatMessage]| -> Result<String> {
+        let mut chat = |msgs: &[ChatMessage]| -> Result<CallOutcome> {
             let sys = &msgs[0].content;
             let last = &msgs[msgs.len() - 1].content;
             if sys.contains("字段字典提取器") {
                 if last.contains("字典尚未定义的字段") {
                     rec_seen += 1;
-                    Ok(sample(Kind::Dictionary))
+                    Ok(canned_out(sample(Kind::Dictionary)))
                 } else {
-                    Ok(short_raw.clone())
+                    Ok(canned_out(short_raw.clone()))
                 }
             } else {
                 canned_chat(msgs)
@@ -1147,6 +1249,10 @@ mod tests {
         };
         let st = run(&ws, &Kind::ORDER, &mut chat).unwrap();
         assert_eq!(rec_seen, 1, "应恰好触发一次对账回喂");
+        // 6 次调用 = 五类产物各 1 + 对账回喂 1，账本分毫不差
+        let u = st.stage(StageId::S3).unwrap().usage.clone().unwrap();
+        assert_eq!(u.tokens_in, Some(600));
+        assert_eq!(u.tokens_out, Some(240));
         assert_eq!(st.stage(StageId::S3).unwrap().status, StageStatus::Approved);
         let on_disk: Value = serde_json::from_str(
             &std::fs::read_to_string(ws.artifact_path(DICTIONARY_ARTIFACT)).unwrap(),
@@ -1172,6 +1278,17 @@ mod tests {
         assert_eq!(st.stage(StageId::S3).unwrap().status, StageStatus::Approved);
         assert!(st.stage(StageId::S3).unwrap().output_hash.is_some());
         assert_eq!(st.current_stage, StageId::S4);
+        // 用量入账：5 次调用 × (100 in / 40 out)，未配单价则不估费用
+        let u1 = st
+            .stage(StageId::S3)
+            .unwrap()
+            .usage
+            .clone()
+            .expect("S3 应记用量");
+        assert_eq!(u1.tokens_in, Some(500));
+        assert_eq!(u1.tokens_out, Some(200));
+        assert_eq!(u1.model.as_deref(), Some("canned-1"));
+        assert_eq!(u1.cost_estimate, None);
         for k in Kind::ORDER {
             assert!(ws.artifact_path(k.file()).exists(), "缺 {}", k.file());
         }
@@ -1180,17 +1297,52 @@ mod tests {
         let first = st.stage(StageId::S3).unwrap().output_hash.clone();
         let st2 = run(&ws, &Kind::ORDER, canned_chat).unwrap();
         assert_eq!(first, st2.stage(StageId::S3).unwrap().output_hash);
+        // 账本跨运行累计：第二轮叠加而非重置
+        let u2 = st2.stage(StageId::S3).unwrap().usage.clone().unwrap();
+        assert_eq!(u2.tokens_in, Some(1000));
+        assert_eq!(u2.tokens_out, Some(400));
 
         // 只重提取 rules：其余产物从磁盘补足，交叉校验仍生效
         let st3 = run(&ws, &[Kind::Rules], |msgs| {
             if msgs[0].content.contains("行业规则提取器") {
-                Ok(sample(Kind::Rules))
+                Ok(canned_out(sample(Kind::Rules)))
             } else {
                 bail!("不应再提取其他类型")
             }
         })
         .unwrap();
         assert_eq!(first, st3.stage(StageId::S3).unwrap().output_hash);
+        let u3 = st3.stage(StageId::S3).unwrap().usage.clone().unwrap();
+        assert_eq!(u3.tokens_in, Some(1100), "单类重提取也应累计入账");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn usage_cost_estimated_only_with_both_prices() {
+        let base = std::env::temp_dir().join(format!("iw-ex-cost-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let ws = Workspace::create_at(&base, "ex-cost").unwrap();
+        let cfg_path = ws.root.join("icewright.toml");
+        let raw = std::fs::read_to_string(&cfg_path).unwrap().replace(
+            "[model.routing]",
+            "price_in_per_mtok = 2.0\nprice_out_per_mtok = 4.0\n[model.routing]",
+        );
+        std::fs::write(&cfg_path, raw).unwrap();
+        std::fs::write(ws.root.join("corpus/规则.md"), "语料").unwrap();
+        let st0 = state::PipelineState::new("ex-cost", "run-20261001-0009", None);
+        state::save_state(&ws.state_path(), &st0).unwrap();
+
+        let st = run(&ws, &Kind::ORDER, canned_chat).unwrap();
+        let u = st.stage(StageId::S3).unwrap().usage.clone().unwrap();
+        // (500×2.0 + 200×4.0)/1e6 = 0.0018
+        let cost = u.cost_estimate.expect("配了双单价应估算费用");
+        assert!((cost - 0.0018).abs() < 1e-9, "cost={cost}");
+        // 再跑一轮：token 与费用同步累计
+        let st2 = run(&ws, &Kind::ORDER, canned_chat).unwrap();
+        let u2 = st2.stage(StageId::S3).unwrap().usage.clone().unwrap();
+        assert_eq!(u2.tokens_in, Some(1000));
+        let cost2 = u2.cost_estimate.unwrap();
+        assert!((cost2 - 0.0036).abs() < 1e-9, "cost={cost2}");
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -1217,7 +1369,7 @@ mod tests {
         changed["rules"][0]["statement"] = serde_json::json!("变更后的规则文案");
         run(&ws, &[Kind::Rules], |msgs| {
             if msgs[0].content.contains("行业规则提取器") {
-                Ok(changed.to_string())
+                Ok(canned_out(changed.to_string()))
             } else {
                 bail!("只应重提取 rules")
             }
@@ -1231,7 +1383,7 @@ mod tests {
         // 同内容再跑一轮：哈希不变、不作废
         run(&ws, &[Kind::Rules], |msgs| {
             if msgs[0].content.contains("行业规则提取器") {
-                Ok(changed.to_string())
+                Ok(canned_out(changed.to_string()))
             } else {
                 bail!("只应重提取 rules")
             }
@@ -1264,7 +1416,7 @@ mod tests {
         });
         let e = run(&ws, &Kind::ORDER, |msgs: &[ChatMessage]| {
             if msgs[0].content.contains("行业规则提取器") {
-                Ok(bad_rules.to_string())
+                Ok(canned_out(bad_rules.to_string()))
             } else {
                 canned_chat(msgs)
             }
@@ -1273,6 +1425,9 @@ mod tests {
         assert!(e.to_string().contains("FLD-ghost"), "{e}");
         // S3 不落盘
         assert!(!ws.artifact_path(RULES_ARTIFACT).exists());
+        // 失败轮次不记账
+        let st = state::load_state(&ws.state_path()).unwrap();
+        assert!(st.stage(StageId::S3).unwrap().usage.is_none());
         let _ = std::fs::remove_dir_all(&base);
     }
 }

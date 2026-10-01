@@ -36,6 +36,7 @@ const MESSAGES: &[(&str, &str, &str)] = &[
     ("s2_blocked", "S2 预检未通过，禁止进入 S3：先运行 `icewright pipeline preflight {ws}`", "S2 preflight not passed; S3 is blocked. Run `icewright pipeline preflight {ws}` first"),
     ("unknown_kind", "未知产物类型 {kind}（可选 apis/flows/dictionary/rules/skills）", "Unknown artifact kind {kind} (choose from apis/flows/dictionary/rules/skills)"),
     ("extract_line", "  {slug} → {n} 项（{file}）", "  {slug} → {n} items ({file})"),
+    ("extract_usage", "模型用量（S3 累计）：输入 {in} / 输出 {out} tokens，费用估算 {cost}", "Model usage (S3 cumulative): {in} input / {out} output tokens, cost estimate {cost}"),
     ("extract_done", "S3 完成（{n} 类产物已交叉校验）；当前阶段 {stage}", "S3 done ({n} artifact kinds cross-checked); current stage {stage}"),
     ("extract_next", "下一步：`icewright design render {ws}` 生成设计文档供闸门A确认", "Next: `icewright design render {ws}` renders the design doc for Gate A review"),
     ("status_none", "workspace {ws} 尚无 pipeline（尚未运行构建）", "workspace {ws} has no pipeline yet (build not started)"),

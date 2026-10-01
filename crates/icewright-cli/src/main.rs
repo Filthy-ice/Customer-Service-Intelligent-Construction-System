@@ -395,7 +395,12 @@ fn cmd_pipeline_extract(ws_id: &str, kinds: &[String]) -> Result<()> {
             false,
             std::time::Duration::from_secs(120),
         )
-        .map(|o| o.content)
+        .map(|o| icewright_core::extract::CallOutcome {
+            content: o.content,
+            model: Some(o.model),
+            tokens_in: o.tokens_in,
+            tokens_out: o.tokens_out,
+        })
     })?;
     for k in &selected {
         let v: serde_json::Value =
@@ -409,6 +414,24 @@ fn cmd_pipeline_extract(ws_id: &str, kinds: &[String]) -> Result<()> {
                     ("slug", k.slug()),
                     ("n", &n.to_string()),
                     ("file", k.file())
+                ]
+            )
+        );
+    }
+    if let Some(u) = st.stage(state::StageId::S3).and_then(|s| s.usage.as_ref()) {
+        println!(
+            "{}",
+            tf(
+                "extract_usage",
+                &[
+                    ("in", &u.tokens_in.unwrap_or(0).to_string()),
+                    ("out", &u.tokens_out.unwrap_or(0).to_string()),
+                    (
+                        "cost",
+                        &u.cost_estimate
+                            .map(|c| format!("≈{c:.4}"))
+                            .unwrap_or_else(|| "-".to_string())
+                    ),
                 ]
             )
         );
@@ -451,15 +474,30 @@ fn cmd_pipeline_status(ws_id: &str) -> Result<()> {
             Some(g) => format!(" gate={:?}({})", g.decision, g.by),
             None => String::new(),
         };
+        let usage = s
+            .usage
+            .as_ref()
+            .map(|u| {
+                format!(
+                    " tokens={}/{} cost={}",
+                    u.tokens_in.unwrap_or(0),
+                    u.tokens_out.unwrap_or(0),
+                    u.cost_estimate
+                        .map(|c| format!("{c:.4}"))
+                        .unwrap_or_else(|| "-".to_string())
+                )
+            })
+            .unwrap_or_default();
         println!(
-            "  {:?} {:<16} {}{}",
+            "  {:?} {:<16} {}{}{}",
             s.id,
             format!("{:?}", s.status),
             s.output_hash
                 .as_deref()
                 .map(|h| &h[7..15])
                 .unwrap_or("--------"),
-            gate
+            gate,
+            usage
         );
     }
     Ok(())

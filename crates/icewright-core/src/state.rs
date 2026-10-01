@@ -93,7 +93,7 @@ pub struct StageFailure {
     pub located_refs: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StageUsage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -104,6 +104,48 @@ pub struct StageUsage {
     pub tokens_out: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost_estimate: Option<f64>,
+}
+
+impl StageUsage {
+    /// 账本式累计：token 只增不覆盖；单价缺失时保留既有费用估算，绝不凭空清零。
+    pub fn accumulate(
+        &mut self,
+        model: Option<String>,
+        tokens_in: u64,
+        tokens_out: u64,
+        cost: Option<f64>,
+    ) {
+        if model.is_some() {
+            self.model = model;
+        }
+        self.tokens_in = Some(self.tokens_in.unwrap_or(0) + tokens_in);
+        self.tokens_out = Some(self.tokens_out.unwrap_or(0) + tokens_out);
+        self.cost_estimate = match (self.cost_estimate, cost) {
+            (Some(a), Some(b)) => Some(a + b),
+            (a, b) => a.or(b),
+        };
+    }
+}
+
+/// 把一次模型消耗的净账记入指定阶段（多次运行累计，不重置）。
+pub fn record_stage_usage(st: &mut PipelineState, id: StageId, usage: StageUsage) -> Result<()> {
+    let stage = st
+        .stages
+        .iter_mut()
+        .find(|s| s.id == id)
+        .with_context(|| format!("未知阶段 {id:?}"))?;
+    match &mut stage.usage {
+        Some(existing) => {
+            existing.accumulate(
+                usage.model,
+                usage.tokens_in.unwrap_or(0),
+                usage.tokens_out.unwrap_or(0),
+                usage.cost_estimate,
+            );
+        }
+        None => stage.usage = Some(usage),
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
