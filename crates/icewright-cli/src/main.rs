@@ -95,7 +95,7 @@ enum PipelineAction {
     /// S3 领域产物提取（契约校验 + 修复回环 + 跨产物引用检查）
     Extract {
         ws: String,
-        /// 仅提取指定类型（apis/flows/dictionary/rules）；缺省按依赖顺序提取全部四类
+        /// 仅提取指定类型（apis/flows/dictionary/rules/skills）；缺省按依赖顺序提取全部五类
         #[arg(long)]
         kinds: Vec<String>,
     },
@@ -347,7 +347,7 @@ fn cmd_pipeline_extract(ws_id: &str, kinds: &[String]) -> Result<()> {
             .iter()
             .map(|s| {
                 Kind::parse_slug(s).ok_or_else(|| {
-                    anyhow::anyhow!("未知产物类型 {s}（可选 apis/flows/dictionary/rules）")
+                    anyhow::anyhow!("未知产物类型 {s}（可选 apis/flows/dictionary/rules/skills）")
                 })
             })
             .collect::<Result<_>>()?
@@ -372,13 +372,7 @@ fn cmd_pipeline_extract(ws_id: &str, kinds: &[String]) -> Result<()> {
     for k in &selected {
         let v: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(ws.artifact_path(k.file()))?)?;
-        let arr = match k {
-            Kind::Apis => "apis",
-            Kind::Flows => "flows",
-            Kind::Dictionary => "fields",
-            Kind::Rules => "rules",
-        };
-        let n = v[arr].as_array().map(|a| a.len()).unwrap_or(0);
+        let n = v[k.id_keys().0].as_array().map(|a| a.len()).unwrap_or(0);
         println!("  {} → {} 项（{}）", k.slug(), n, k.file());
     }
     println!(

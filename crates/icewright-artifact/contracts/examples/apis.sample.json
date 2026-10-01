@@ -35,6 +35,35 @@
         }
       ],
       "confirmed_by_customer": false
+    },
+    {
+      "id": "API-survey-create",
+      "purpose": "查勘工单创建",
+      "endpoint": "/claim/{caseNo}/survey",
+      "method": "POST",
+      "auth_ref": "keyring://ws/auto-claim/core-api",
+      "auth_style": "api_key_header",
+      "params": [{ "name": "caseNo", "in": "path", "type": "string", "required": true, "pii": "masked" }],
+      "response": {
+        "fields": [
+          { "path": "$.surveyNo", "dict_field": "FLD-survey_no" },
+          { "path": "$.accidentTime", "dict_field": "FLD-accident_time" }
+        ]
+      },
+      "timeout_ms": 5000,
+      "retry": { "max": 1, "backoff": "exp" },
+      "fallback": {
+        "on_timeout": { "action": "script", "ref": "S-survey-unavailable", "escalation": "optional" },
+        "on_4xx": { "action": "transfer_human" }
+      },
+      "sensitivity": ["caseNo"],
+      "mock_examples": [
+        {
+          "label": "created",
+          "response": { "surveyNo": "SV-2026-0001", "accidentTime": "2026-09-19T08:30:00+08:00" }
+        }
+      ],
+      "confirmed_by_customer": false
     }
   ]
 }

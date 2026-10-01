@@ -6,8 +6,8 @@
 
 ## 它做什么
 
-- **S1–S8 分步流水线**：需求摄入 → 环境预检 → 领域提取（规则/流程/数据字典/外部接口四类产物）→ 设计文档（闸门A 人工确认）→ 代码生成 → 自动验证（编译+单测+评测回放）→ 交付报告（闸门B 验收）→ 运行与迭代。
-- **契约先行**：所有领域产物均受 JSON Schema（draft 2020-12）约束，跨产物引用做完整性校验（悬空字段/未知流程/未确认接口一律拦截）。
+- **S1–S8 分步流水线**：需求摄入 → 环境预检 → 领域提取（规则/流程/数据字典/外部接口/技能绑定五类产物）→ 设计文档（闸门A 人工确认）→ 代码生成 → 自动验证（编译+单测+评测回放）→ 交付报告（闸门B 验收）→ 运行与迭代。
+- **契约先行**：所有领域产物均受 JSON Schema（draft 2020-12）约束，跨产物引用做完整性校验（悬空字段/未知流程/未确认接口/失效技能绑定一律拦截）。接口存在性与技能生效均由人工逐条确认（模型一律输出未确认态），未确认接口/技能在 S5 生成阶段被硬闸拒绝；生成项目运行时只装载已确认技能。
 - **生成系统不落业务数据**：会话槽位放 Redis，业务数据运行时实时调用客户核心系统 API（接口契约驱动，支持 mock 回放评测）。
 - **可断点续跑**：每个 workspace 独立隔离，状态机可恢复；产物任何变更自动作废已有人工确认，杜绝"批过的设计"与"生成的代码"脱节。
 - **自带模型接入（BYOK）**：任何 OpenAI-compatible 端点均可；供应商目录 + 在线模型发现，接入点与模型名不写死。
@@ -28,7 +28,7 @@ icewright model probe my-claim                     # 验证端点+密钥+模型�
 icewright config set my-claim workspace.pack "insurance/auto-claim@0.1.0"
 icewright pipeline init my-claim
 icewright pipeline preflight my-claim              # S2 预检
-icewright pipeline extract my-claim                # S3 四类产物提取（校验-修复回环）
+icewright pipeline extract my-claim                # S3 五类产物提取（校验-修复回环，可 --kinds 增补单类）
 icewright design render my-claim                   # S4 设计文档
 icewright design approve my-claim --by 张三         # 闸门A
 icewright generate my-claim --out ./generated      # S5 生成目标工程

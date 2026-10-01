@@ -69,6 +69,10 @@ static TEMPLATES: &[(&str, &str)] = &[
         include_str!("../templates/python/app/domain/rules.py"),
     ),
     (
+        "app/domain/skills.py",
+        include_str!("../templates/python/app/domain/skills.py"),
+    ),
+    (
         "app/integration/__init__.py",
         include_str!("../templates/python/app/integration/__init__.py"),
     ),
@@ -83,6 +87,10 @@ static TEMPLATES: &[(&str, &str)] = &[
     (
         "tests/test_rules.py",
         include_str!("../templates/python/tests/test_rules.py"),
+    ),
+    (
+        "tests/test_skills.py",
+        include_str!("../templates/python/tests/test_skills.py"),
     ),
 ];
 
@@ -164,6 +172,34 @@ pub fn generate(ws: &Workspace, out_dir: &Path) -> Result<GenerateReport> {
     }
 
     let cfg = ws.config()?;
+    // 契约硬闸：技能须逐条人工确认（模型一律输出 pending），未确认技能不进运行时
+    let skills_path = ws.artifact_path(crate::extract::SKILLS_ARTIFACT);
+    let skills_raw = if skills_path.exists() {
+        let raw = std::fs::read_to_string(&skills_path)?;
+        let skills: Value = serde_json::from_str(&raw)?;
+        let errors = icewright_artifact::validate_instance("skills", &skills)?;
+        if !errors.is_empty() {
+            bail!("skills.json 违反契约，拒绝生成：{errors:?}");
+        }
+        let pending: Vec<&str> = skills["skills"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter(|x| x["status"].as_str() != Some("confirmed"))
+                    .filter_map(|x| x["id"].as_str())
+                    .collect()
+            })
+            .unwrap_or_default();
+        if !pending.is_empty() {
+            bail!(
+                "以下技能未获人工确认（须把 skills.json 的 status 改为 confirmed 并重新过闸门A）：{}",
+                pending.join(", ")
+            );
+        }
+        Some(raw)
+    } else {
+        None
+    };
     let cfg_pack = if cfg.workspace.pack.is_empty() {
         None
     } else {
@@ -206,6 +242,10 @@ pub fn generate(ws: &Workspace, out_dir: &Path) -> Result<GenerateReport> {
     let data_dir = out_dir.join("app/data");
     std::fs::create_dir_all(&data_dir)?;
     std::fs::write(data_dir.join("rules.json"), &rules_raw)?;
+    if let Some(raw) = &skills_raw {
+        hashed.push(format!("app/data/skills.json\n{raw}"));
+        std::fs::write(data_dir.join("skills.json"), raw)?;
+    }
 
     hashed.sort();
     let output_hash = state::sha256_hex(hashed.join("\n---\n").as_bytes());
@@ -213,6 +253,9 @@ pub fn generate(ws: &Workspace, out_dir: &Path) -> Result<GenerateReport> {
     let cfg_raw = std::fs::read(ws.root.join("icewright.toml"))?;
     let template_bytes: Vec<&[u8]> = TEMPLATES.iter().map(|(_, t)| t.as_bytes()).collect();
     let mut input_parts: Vec<&[u8]> = vec![rules_raw.as_bytes(), &cfg_raw];
+    if let Some(raw) = &skills_raw {
+        input_parts.push(raw.as_bytes());
+    }
     input_parts.extend(template_bytes.iter().copied());
     let in_hash = state::input_hash(&input_parts);
 
@@ -369,10 +412,56 @@ mod tests {
         let err = generate(&ws, &ws.root.join("output")).unwrap_err();
         assert!(err.to_string().contains("API-claim-progress"), "{err}");
 
-        // 人工把存在性确认改为 true 后放行
+        // 人工把全部接口的存在性确认改为 true 后放行
         let mut v = apis;
-        v["apis"][0]["confirmed_by_customer"] = serde_json::json!(true);
+        for a in v["apis"].as_array_mut().unwrap() {
+            a["confirmed_by_customer"] = serde_json::json!(true);
+        }
         std::fs::write(&path, serde_json::to_string_pretty(&v).unwrap()).unwrap();
         assert!(generate(&ws, &ws.root.join("output")).is_ok());
+    }
+
+    #[test]
+    fn pending_skill_blocks_generation() {
+        let ws = setup("skillconfirm");
+        let skills = icewright_artifact::example("skills").unwrap();
+        let path = ws.artifact_path(crate::extract::SKILLS_ARTIFACT);
+        std::fs::write(&path, serde_json::to_string_pretty(&skills).unwrap()).unwrap();
+        let err = generate(&ws, &ws.root.join("output")).unwrap_err();
+        assert!(err.to_string().contains("SK-report-accident"), "{err}");
+
+        // 人工把技能 status 逐条改为 confirmed 后放行，且技能数据编译进项目
+        let mut v = skills;
+        for s in v["skills"].as_array_mut().unwrap() {
+            s["status"] = serde_json::json!("confirmed");
+        }
+        std::fs::write(&path, serde_json::to_string_pretty(&v).unwrap()).unwrap();
+        let out = ws.root.join("output");
+        assert!(generate(&ws, &out).is_ok());
+        assert!(out.join("app/data/skills.json").exists());
+    }
+
+    #[test]
+    fn skills_hard_gate_is_orthogonal_to_apis() {
+        // 接口全部确认后，技能未确认依然拒绝生成（两道硬闸互不替代）
+        let ws = setup("bothgates");
+        let mut apis = icewright_artifact::example("api-contract").unwrap();
+        for a in apis["apis"].as_array_mut().unwrap() {
+            a["confirmed_by_customer"] = serde_json::json!(true);
+        }
+        std::fs::write(
+            ws.artifact_path(crate::extract::APIS_ARTIFACT),
+            serde_json::to_string_pretty(&apis).unwrap(),
+        )
+        .unwrap();
+        let skills = icewright_artifact::example("skills").unwrap();
+        std::fs::write(
+            ws.artifact_path(crate::extract::SKILLS_ARTIFACT),
+            serde_json::to_string_pretty(&skills).unwrap(),
+        )
+        .unwrap();
+        let err = generate(&ws, &ws.root.join("output")).unwrap_err();
+        assert!(err.to_string().contains("未获人工确认"), "{err}");
+        assert!(err.to_string().contains("SK-progress-query"), "{err}");
     }
 }

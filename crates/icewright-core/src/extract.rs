@@ -10,9 +10,10 @@ pub const RULES_ARTIFACT: &str = "rules.json";
 pub const DICTIONARY_ARTIFACT: &str = "dictionary.json";
 pub const FLOWS_ARTIFACT: &str = "flows.json";
 pub const APIS_ARTIFACT: &str = "apis.json";
+pub const SKILLS_ARTIFACT: &str = "skills.json";
 const MAX_CORPUS_BYTES: u64 = 512 * 1024;
 
-/// S3 领域的四类产物。ORDER 即依赖顺序：apis → flows → dictionary → rules，
+/// S3 领域的五类产物。ORDER 即依赖顺序：apis → flows → dictionary → rules → skills，
 /// 后提取者的提示词里注入前提取物的 id 白名单，从源头减少悬空引用。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -20,10 +21,17 @@ pub enum Kind {
     Flows,
     Dictionary,
     Rules,
+    Skills,
 }
 
 impl Kind {
-    pub const ORDER: [Kind; 4] = [Kind::Apis, Kind::Flows, Kind::Dictionary, Kind::Rules];
+    pub const ORDER: [Kind; 5] = [
+        Kind::Apis,
+        Kind::Flows,
+        Kind::Dictionary,
+        Kind::Rules,
+        Kind::Skills,
+    ];
 
     pub fn slug(self) -> &'static str {
         match self {
@@ -31,6 +39,7 @@ impl Kind {
             Kind::Flows => "flows",
             Kind::Dictionary => "dictionary",
             Kind::Rules => "rules",
+            Kind::Skills => "skills",
         }
     }
 
@@ -40,6 +49,7 @@ impl Kind {
             Kind::Flows => "flows",
             Kind::Dictionary => "data-dictionary",
             Kind::Rules => "rules",
+            Kind::Skills => "skills",
         }
     }
 
@@ -49,6 +59,7 @@ impl Kind {
             Kind::Flows => FLOWS_ARTIFACT,
             Kind::Dictionary => DICTIONARY_ARTIFACT,
             Kind::Rules => RULES_ARTIFACT,
+            Kind::Skills => SKILLS_ARTIFACT,
         }
     }
 
@@ -57,12 +68,13 @@ impl Kind {
     }
 
     /// 顶层数组键 + id 键，用于统一收集各类产物的 id。
-    fn id_keys(self) -> (&'static str, &'static str) {
+    pub fn id_keys(self) -> (&'static str, &'static str) {
         match self {
             Kind::Apis => ("apis", "id"),
             Kind::Flows => ("flows", "flow"),
             Kind::Dictionary => ("fields", "field"),
             Kind::Rules => ("rules", "id"),
+            Kind::Skills => ("skills", "id"),
         }
     }
 
@@ -99,6 +111,17 @@ impl Kind {
                  2. 条件表达式只能引用语料中明确出现或可派生的字段；引用不到就不要写该条件。\n\
                  3. 不臆造金额、时限、比例等数字；语料未给出就不要发明。\n\
                  4. id 形如 R-<域前缀>-<四位数字>，全局唯一。",
+            ),
+            Kind::Skills => (
+                "技能绑定提取器",
+                "1. skill id 形如 SK-<域>-<含义>；intents 为语料对话场景归纳的意图标签（英文小写下划线）。\n\
+                 2. capability.kind 只允许 flow/api_call/api_chain/script/rag_query：\
+                 flow 的 ref 必须是白名单内的 F-*；api_call 的 ref 必须是白名单内的 API-*；\
+                 api_chain 的 ref 按调用顺序以英文逗号连接多个白名单 API-*；script/rag_query 的 ref 不做白名单约束。\n\
+                 3. required_fields、preconditions 中出现的 FLD-*、input_map/output_map 值里的 FLD-*，\
+                 一律只允许字典白名单内已定义的字段，不得引用未定义字段。\n\
+                 4. rule_refs 只列确实作用于本技能的白名单 R-*；没有依据就不写。\n\
+                 5. status 一律输出 pending——技能是否生效由人工在闸门A确认，模型无权确认。",
             ),
         };
         Ok(format!(
@@ -320,17 +343,20 @@ fn classify_on(on: &str) -> OnRef<'_> {
 
 /// 跨产物引用完整性（FR-B4 全量）。返回问题清单，空 = 全部引用可解析。
 /// 传 None 表示该类产物缺失——跳过依赖它的检查（宁可漏报不误伤）。
+#[allow(clippy::too_many_arguments)]
 pub fn cross_check(
     apis: Option<&Value>,
     flows: Option<&Value>,
     dict: Option<&Value>,
     rules: Option<&Value>,
+    skills: Option<&Value>,
 ) -> Vec<String> {
     let mut problems = Vec::new();
     let api_ids = id_list(apis, Kind::Apis);
     let flow_ids = id_list(flows, Kind::Flows);
     let dict_ids = id_list(dict, Kind::Dictionary);
     let rule_ids = id_list(rules, Kind::Rules);
+    let skill_ids = id_list(skills, Kind::Skills);
 
     // rules → 数据字典
     if dict.is_some() {
@@ -415,6 +441,13 @@ pub fn cross_check(
                 ) {
                     problems.push(msg);
                 }
+                if a["kind"].as_str() == Some("skill_call") {
+                    if let (true, Some(r)) = (skills.is_some(), a["ref"].as_str()) {
+                        if !skill_ids.iter().any(|x| x == r) {
+                            problems.push(format!("流程 {fid}/{sid} 调用了不存在的技能 {r}"));
+                        }
+                    }
+                }
             }
         }
     }
@@ -468,12 +501,93 @@ pub fn cross_check(
             }
         }
     }
+    // skills：能力绑定、字段引用、规则回填全部必须可解析
+    for sk in arr_of(skills, "skills") {
+        let sid = sk["id"].as_str().unwrap_or("?");
+        let cap = &sk["capability"];
+        let kind_s = cap["kind"].as_str().unwrap_or("");
+        let ref_s = cap["ref"].as_str().unwrap_or("");
+        match kind_s {
+            "flow" => {
+                if flows.is_some() && !flow_ids.iter().any(|x| x == ref_s) {
+                    problems.push(format!("技能 {sid} 绑定的流程 {ref_s} 不存在"));
+                }
+            }
+            "api_call" => {
+                if apis.is_some() && !api_ids.iter().any(|x| x == ref_s) {
+                    problems.push(format!("技能 {sid} 调用的接口 {ref_s} 不存在"));
+                }
+            }
+            "api_chain" => {
+                for part in ref_s.split(',') {
+                    let p = part.trim();
+                    if !p.is_empty() && apis.is_some() && !api_ids.iter().any(|x| x == p) {
+                        problems.push(format!("技能 {sid} 调用链含不存在的接口 {p}"));
+                    }
+                }
+            }
+            _ => {}
+        }
+        if dict.is_some() {
+            for rf in arr_of(Some(sk), "required_fields") {
+                if let Some(f) = rf.as_str() {
+                    if !dict_ids.iter().any(|x| x == f) {
+                        problems.push(format!("技能 {sid} 的前置字段 {f} 未在字典定义"));
+                    }
+                }
+            }
+            for m in ["input_map", "output_map"] {
+                if let Some(obj) = cap[m].as_object() {
+                    for v in obj.values() {
+                        if let Some(s) = v.as_str() {
+                            if s.starts_with("FLD-") && !dict_ids.iter().any(|x| x == s) {
+                                problems.push(format!("技能 {sid} 的 {m} 映射了未定义字段 {s}"));
+                            }
+                        }
+                    }
+                }
+            }
+            for p in arr_of(Some(sk), "preconditions") {
+                if let Some(s) = p.as_str() {
+                    for tok in fld_tokens(s) {
+                        if !dict_ids.contains(&tok) {
+                            problems.push(format!("技能 {sid} 前置条件引用未定义字段 {tok}"));
+                        }
+                    }
+                }
+            }
+        }
+        if rules.is_some() {
+            for r in arr_of(Some(sk), "rule_refs") {
+                if let Some(s) = r.as_str() {
+                    if !rule_ids.iter().any(|x| x == s) {
+                        problems.push(format!("技能 {sid} 引用了不存在的规则 {s}"));
+                    }
+                }
+            }
+        }
+    }
     problems
+}
+
+/// 抽取表达式文本中出现的全部 FLD-<ASCII标识符> token。
+fn fld_tokens(expr: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = expr;
+    while let Some(pos) = rest.find("FLD-") {
+        let tail = &rest[pos + 4..];
+        let end = tail
+            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '-'))
+            .unwrap_or(tail.len());
+        out.push(format!("FLD-{}", &tail[..end]));
+        rest = &tail[end..];
+    }
+    out
 }
 
 /// 把 rules 中的字段引用与数据字典做悬空引用检查（FR-B4 的 rules→dict 子集）。
 pub fn dangling_field_refs(rules: &Value, dictionary: Option<&Value>) -> Vec<String> {
-    cross_check(None, None, dictionary, Some(rules))
+    cross_check(None, None, dictionary, Some(rules), None)
 }
 
 /// 递归收集一条规则里所有 `{"field": "FLD-..."}` 引用（可能有重复）。
@@ -516,7 +630,7 @@ fn read_kind(ws: &Workspace, kind: Kind) -> Result<Option<Value>> {
 }
 
 /// S3 执行体：产物落盘 artifacts/*.json，状态推进到 S4。
-/// output_hash 覆盖磁盘上全部四类产物（含本轮未重新提取的）。
+/// output_hash 覆盖磁盘上全部五类产物（含本轮未重新提取的）。
 pub fn record_s3(ws: &Workspace, corpus: &str, extracted: &[(Kind, Value)]) -> Result<()> {
     let path = ws.state_path();
     if !path.exists() {
@@ -582,7 +696,7 @@ where
 {
     let corpus = load_corpus(&ws.root)?;
     let mut extracted: Vec<(Kind, Value)> = Vec::new();
-    let mut current: Vec<Option<Value>> = vec![None; 4];
+    let mut current: Vec<Option<Value>> = vec![None; Kind::ORDER.len()];
     for k in Kind::ORDER {
         let pos = Kind::ORDER.iter().position(|x| *x == k).unwrap_or(0);
         if !kinds.contains(&k) {
@@ -618,6 +732,26 @@ where
                 } else {
                     format!("FLD-*: {}\n", dict_ids.join(", "))
                 }
+            }
+            Kind::Skills => {
+                let mut s = String::new();
+                let api_ids = id_list(current[0].as_ref(), Kind::Apis);
+                if !api_ids.is_empty() {
+                    s.push_str(&format!("API-*: {}\n", api_ids.join(", ")));
+                }
+                let flow_ids = id_list(current[1].as_ref(), Kind::Flows);
+                if !flow_ids.is_empty() {
+                    s.push_str(&format!("F-*: {}\n", flow_ids.join(", ")));
+                }
+                let dict_ids = id_list(current[2].as_ref(), Kind::Dictionary);
+                if !dict_ids.is_empty() {
+                    s.push_str(&format!("FLD-*: {}\n", dict_ids.join(", ")));
+                }
+                let rule_ids = id_list(current[3].as_ref(), Kind::Rules);
+                if !rule_ids.is_empty() {
+                    s.push_str(&format!("R-*: {}\n", rule_ids.join(", ")));
+                }
+                s
             }
         };
         let value = extract_artifact(k, &corpus, &known_ids, 2, &mut chat)?;
@@ -695,6 +829,7 @@ where
         current[1].as_ref(),
         current[2].as_ref(),
         current[3].as_ref(),
+        current[4].as_ref(),
     );
     if !problems.is_empty() {
         bail!(
@@ -720,7 +855,7 @@ mod tests {
             .to_string()
     }
 
-    /// 按 system prompt 中的角色词分派的 canned 模型——离线复现四类提取。
+    /// 按 system prompt 中的角色词分派的 canned 模型——离线复现五类提取。
     fn canned_chat(msgs: &[ChatMessage]) -> Result<String> {
         let sys = &msgs[0].content;
         let out = if sys.contains("接口契约提取器") {
@@ -729,8 +864,12 @@ mod tests {
             sample(Kind::Flows)
         } else if sys.contains("字段字典提取器") {
             sample(Kind::Dictionary)
-        } else {
+        } else if sys.contains("行业规则提取器") {
             sample(Kind::Rules)
+        } else if sys.contains("技能绑定提取器") {
+            sample(Kind::Skills)
+        } else {
+            unreachable!("未知提取角色")
         };
         Ok(out)
     }
@@ -802,6 +941,7 @@ mod tests {
             Some(&icewright_artifact::example("flows").unwrap()),
             Some(&icewright_artifact::example("data-dictionary").unwrap()),
             Some(&icewright_artifact::example("rules").unwrap()),
+            Some(&icewright_artifact::example("skills").unwrap()),
         );
         assert_eq!(
             problems,
@@ -824,7 +964,7 @@ mod tests {
             {"field":"FLD-d","type":"number","source":{"kind":"derived","expr":"x","depends_on":["FLD-nope"]}}
         ]});
         let rules: Value = serde_json::json!({"rules":[{"id":"R-1","condition":{"field":"FLD-absent","op":"==","value":1}}]});
-        let p = cross_check(Some(&apis), Some(&flows), Some(&dict), Some(&rules));
+        let p = cross_check(Some(&apis), Some(&flows), Some(&dict), Some(&rules), None);
         // 应抓到：规则悬空 FLD、entry 不存在、to 不存在、rule_ref 缺失、on 未知字段、
         // slots_complete 未知流程、dict 三类坏引用；FLD-x2 未被强查（仅查引用有效性）
         assert!(p.iter().any(|x| x.contains("FLD-absent")), "{p:?}");
@@ -849,9 +989,66 @@ mod tests {
             "{p:?}"
         );
         // 缺失产物时相应检查跳过、不误伤
-        assert!(cross_check(None, None, Some(&dict), Some(&rules))
+        assert!(cross_check(None, None, Some(&dict), Some(&rules), None)
             .iter()
             .all(|x| !x.contains("API-ghost")));
+    }
+
+    #[test]
+    fn cross_check_detects_skill_binding_problems() {
+        let apis: Value = serde_json::json!({"apis":[{"id":"API-a","response":{"fields":[]}}]});
+        let flows: Value = serde_json::json!({"flows":[{"flow":"F-1","slots":[],"entry":"a",
+            "states":[{"id":"a","transitions":[],"actions":[{"kind":"skill_call","ref":"SK-ghost"}]}]}]});
+        let dict: Value = serde_json::json!({"fields":[
+            {"field":"FLD-x","type":"string","source":{"kind":"api","ref":"API-a"}}]});
+        let rules: Value = serde_json::json!({"rules":[]});
+        let skills: Value = serde_json::json!({"skills":[
+            {"id":"SK-1","name":"绑定坏流程","intents":["i"],"capability":{"kind":"flow","ref":"F-404"}},
+            {"id":"SK-2","name":"绑定坏接口","intents":["i"],
+             "capability":{"kind":"api_call","ref":"API-ghost","input_map":{"a":"FLD-ghost"}},
+             "required_fields":["FLD-ghost"],"preconditions":["FLD-pre != null"],"rule_refs":["R-9"]}
+        ]});
+        let p = cross_check(
+            Some(&apis),
+            Some(&flows),
+            Some(&dict),
+            Some(&rules),
+            Some(&skills),
+        );
+        assert!(
+            p.iter().any(|x| x.contains("SK-1 绑定的流程 F-404")),
+            "{p:?}"
+        );
+        assert!(
+            p.iter().any(|x| x.contains("SK-2 调用的接口 API-ghost")),
+            "{p:?}"
+        );
+        assert!(
+            p.iter()
+                .any(|x| x.contains("input_map 映射了未定义字段 FLD-ghost")),
+            "{p:?}"
+        );
+        assert!(
+            p.iter()
+                .any(|x| x.contains("SK-2 的前置字段 FLD-ghost 未在字典定义")),
+            "{p:?}"
+        );
+        assert!(
+            p.iter()
+                .any(|x| x.contains("前置条件引用未定义字段 FLD-pre")),
+            "{p:?}"
+        );
+        assert!(p.iter().any(|x| x.contains("不存在的规则 R-9")), "{p:?}");
+        assert!(
+            p.iter().any(|x| x.contains("调用了不存在的技能 SK-ghost")),
+            "{p:?}"
+        );
+        // skills 缺失时不误伤流程里的 skill_call 引用
+        assert!(
+            cross_check(Some(&apis), Some(&flows), Some(&dict), Some(&rules), None)
+                .iter()
+                .all(|x| !x.contains("SK-ghost"))
+        );
     }
 
     #[test]

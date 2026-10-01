@@ -176,7 +176,70 @@ pub fn render_design(ws: &Workspace) -> Result<String> {
         out.push_str("- （尚未提供 flows.json；无流程则运行时仅按规则驱动）\n");
     }
 
-    out.push_str("\n## 6. 外部接口（运行时实时调用，本系统不落库）\n\n");
+    out.push_str("\n## 6. 技能清单（意图 → 能力绑定，运行时按意图激活）\n\n");
+    if let Some(skills) = load_json(ws, crate::extract::SKILLS_ARTIFACT)? {
+        let list = skills["skills"].as_array().cloned().unwrap_or_default();
+        let mut pending = 0usize;
+        for s in &list {
+            let status = s["status"].as_str().unwrap_or("pending");
+            if status != "confirmed" {
+                pending += 1;
+            }
+            let cap = &s["capability"];
+            let intents = s["intents"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|x| x.as_str())
+                        .collect::<Vec<_>>()
+                        .join("/")
+                })
+                .unwrap_or_default();
+            let mut extras: Vec<String> = Vec::new();
+            let req: Vec<&str> = s["required_fields"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
+                .unwrap_or_default();
+            if !req.is_empty() {
+                extras.push(format!("前置字段 {}", req.join("、")));
+            }
+            let rr: Vec<&str> = s["rule_refs"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
+                .unwrap_or_default();
+            if !rr.is_empty() {
+                extras.push(format!("生效规则 {}", rr.join("、")));
+            }
+            out.push_str(&format!(
+                "- **{}** {}（意图 {intents}）→ {}:{}{}{}\n",
+                s["id"].as_str().unwrap_or("?"),
+                s["name"].as_str().unwrap_or(""),
+                cap["kind"].as_str().unwrap_or("?"),
+                cap["ref"].as_str().unwrap_or(""),
+                if status == "confirmed" {
+                    String::new()
+                } else {
+                    format!(" ⚠status={status}")
+                },
+                if extras.is_empty() {
+                    String::new()
+                } else {
+                    format!("；{}", extras.join("；"))
+                }
+            ));
+        }
+        if pending > 0 {
+            out.push_str(&format!(
+                "\n> ⚠ {pending} 个技能尚未人工确认（status≠confirmed）；闸门A 审阅时请核对意图覆盖与能力绑定，运行时仅装载已确认技能。\n"
+            ));
+        }
+    } else {
+        out.push_str(
+            "- （尚未提供 skills.json；闸门A 前请补 `pipeline extract --kinds skills`）\n",
+        );
+    }
+
+    out.push_str("\n## 7. 外部接口（运行时实时调用，本系统不落库）\n\n");
     if let Some(apis) = load_json(ws, crate::extract::APIS_ARTIFACT)? {
         let list = apis["apis"].as_array().cloned().unwrap_or_default();
         let mut unconfirmed = 0usize;
@@ -205,7 +268,7 @@ pub fn render_design(ws: &Workspace) -> Result<String> {
         out.push_str("- （尚未提供 apis.json，请在闸门A 前确认对方核心系统接口）\n");
     }
 
-    out.push_str("\n## 7. 闸门A 确认须知\n\n");
+    out.push_str("\n## 8. 闸门A 确认须知\n\n");
     out.push_str("- 本文件由引擎确定性渲染；任何产物变更后须重新 `design render` 并再次确认。\n");
     out.push_str("- 确认后进入 S5 代码生成；驳回请附注原因。\n");
     Ok(out)
@@ -425,6 +488,44 @@ mod tests {
         assert!(md.contains("slots_complete(F-report)"));
         assert!(md.contains("FLD-claim_status"), "字典字段应正确渲染");
         assert!(md.contains("⚠未确认"), "样例接口默认未确认应标红");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn design_renders_skills_and_pending_warning() {
+        let (ws, base) = ws_with_rules("skills");
+        let md = render_design(&ws).unwrap();
+        assert!(
+            md.contains("尚未提供 skills.json"),
+            "缺产物时应给出补齐指引"
+        );
+
+        let skills = icewright_artifact::example("skills").unwrap();
+        std::fs::write(
+            ws.artifact_path(crate::extract::SKILLS_ARTIFACT),
+            serde_json::to_string_pretty(&skills).unwrap(),
+        )
+        .unwrap();
+        let md = render_design(&ws).unwrap();
+        assert!(md.contains("## 6. 技能清单"));
+        assert!(md.contains("**SK-progress-query**"));
+        assert!(md.contains("api_call:API-claim-progress"));
+        assert!(md.contains("⚠status=pending"));
+        assert!(md.contains("3 个技能尚未人工确认"));
+
+        // 全部确认后 pending 警示消失
+        let mut v = skills;
+        for s in v["skills"].as_array_mut().unwrap() {
+            s["status"] = serde_json::json!("confirmed");
+        }
+        std::fs::write(
+            ws.artifact_path(crate::extract::SKILLS_ARTIFACT),
+            serde_json::to_string_pretty(&v).unwrap(),
+        )
+        .unwrap();
+        let md = render_design(&ws).unwrap();
+        assert!(!md.contains("尚未人工确认"));
+        assert!(!md.contains("⚠status="));
         let _ = std::fs::remove_dir_all(&base);
     }
 }
