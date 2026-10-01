@@ -9,9 +9,9 @@ pack = ""          # 行业包引用，如 insurance/auto-claim@0.1.0
 stack = "python"   # python | java | go(experimental)
 
 [model]
-base_url = ""      # OpenAI-compatible 端点
-model = ""         # 默认模型；分阶段路由见 [model.routing]
-key_ref = ""       # 仅 keyring 引用（keyring://...），禁止内联密钥
+base_url = ""      # OpenAI-compatible 端点；`icewright model use <ws> <provider>` 从目录自动填
+model = ""         # 默认模型；`icewright model discover <provider>` 看在线可用名
+key_ref = ""       # 密钥引用：keyring://（软件代存）| env://VAR（用户自配环境变量）| plain:（明文，界面用）
 
 [model.routing]
 # extract = "strong-model"   # S3 规则提取
@@ -21,7 +21,7 @@ key_ref = ""       # 仅 keyring 引用（keyring://...），禁止内联密钥
 #[datasource.redis]
 #host = ""
 #port = 6379
-#key_ref = ""                 # 仅 keyring 引用（keyring://...），禁内联密码
+#key_ref = ""                 # 同上三类引用（推荐 keyring:// 或 env://，避免明文）
 #[datasource.mysql]
 #host = ""
 #port = 3306
@@ -140,7 +140,9 @@ impl Workspace {
             );
         }
         if cfg.model.key_ref.trim().is_empty() {
-            bail!("密钥引用未配置：model.key_ref 必须是 keyring:// 引用");
+            bail!(
+                "密钥引用未配置：model.key_ref 支持 keyring://、env://VAR_NAME、plain: 三种（详见 README「模型接入与密钥」）"
+            );
         }
         Ok(cfg)
     }

@@ -41,11 +41,19 @@ pub fn render_design(ws: &Workspace) -> Result<String> {
     out.push_str(&format!("- 行业包：{}\n", nv(&cfg.workspace.pack)));
     out.push_str(&format!("- 目标栈：{}\n", cfg.workspace.stack));
     out.push_str(&format!(
-        "- 模型：{} @ {}（密钥仅以引用存储：{}）\n",
+        "- 模型：{} @ {}（密钥引用：{}）\n",
         nv(&cfg.model.model),
         mask_endpoint(&cfg.model.base_url),
         key_ref_display(&cfg)
     ));
+    if SecretRef::parse(&cfg.model.key_ref)
+        .map(|r| r.is_plaintext())
+        .unwrap_or(false)
+    {
+        out.push_str(
+            "- ⚠ 模型密钥以明文内嵌于配置文件（plain: 引用，客户端界面场景）。请确保该文件权限 0600 且不提交版本库；工程交付建议改用 env:// 或 keyring:// 引用。\n",
+        );
+    }
     out.push_str("\n## 2. 领域规则清单\n\n");
     out.push_str("| ID | 类型 | 执行点 | 规则内容 |\n|---|---|---|---|\n");
     for r in rules_arr {

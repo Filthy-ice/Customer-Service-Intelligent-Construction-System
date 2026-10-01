@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::Utc;
 use clap::{Parser, Subcommand};
 use icewright_core::{secrets, state, Workspace};
@@ -117,8 +117,15 @@ enum ConfigAction {
 
 #[derive(Subcommand)]
 enum SecretAction {
-    /// 从 stdin 读密钥并存储到 keyring 引用对应位置
+    /// 从 stdin 读密钥并存储到 keyring 引用对应位置（软件代存）
     Set { r#ref: String },
+    /// 软件代配环境变量：stdin 读密钥，写入 ~/.icewright/env/icewright.env 的 export 行（0600）；
+    /// --shell-profile 指定启动文件（如 ~/.bashrc）则同时追加并备份
+    SetEnv {
+        var: String,
+        #[arg(long)]
+        shell_profile: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -181,6 +188,26 @@ enum DeliveryAction {
 enum ModelAction {
     /// 向模型发送一条探测消息并回报延迟与用量
     Probe { ws: String },
+    /// 列出内置+覆盖的供应商目录（接入点/文档/默认模型）
+    Providers,
+    /// 实时拉取供应商 /models 列出当前可用模型名（接入点与模型名不写死）
+    Discover {
+        /// 供应商名（`model providers` 可见），或 --url 直连任意 OpenAI-compatible 端点
+        provider: Option<String>,
+        #[arg(long)]
+        url: Option<String>,
+        /// 指定密钥环境变量名；缺省按供应商候选取第一个已设置的
+        #[arg(long)]
+        key_env: Option<String>,
+    },
+    /// 一键配置 workspace：写入供应商接入点与模型，密钥默认引用环境变量
+    Use {
+        ws: String,
+        provider: String,
+        /// 模型名；缺省用目录默认值（建议先 `model discover` 看在线名称）
+        #[arg(long)]
+        model: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -430,6 +457,178 @@ fn cmd_model_probe(ws_id: &str) -> Result<()> {
     }
 }
 
+fn cmd_model_providers() -> Result<()> {
+    for p in icewright_core::providers::catalog()? {
+        println!("  {:<12} {:<28} {}", p.name, p.display, p.base_url);
+        println!(
+            "  {:<12} 默认模型={}  文档 {}",
+            "", p.default_model, p.docs_url
+        );
+    }
+    println!(
+        "接入点可变：覆盖/扩充请编辑 ~/.icewright/providers.json（同名条目替换内置），\n再配 `icewright model discover <provider>` 以线上 /models 实况为准。"
+    );
+    Ok(())
+}
+
+fn cmd_model_discover(
+    provider: Option<&str>,
+    url: Option<&str>,
+    key_env: Option<&str>,
+) -> Result<()> {
+    let (base, key_envs) = match (provider, url) {
+        (Some(name), _) => {
+            let p = icewright_core::providers::find(name)?;
+            (p.base_url.clone(), p.key_envs)
+        }
+        (None, Some(u)) => (u.to_string(), vec![]),
+        (None, None) => anyhow::bail!("请给出供应商名或 --url"),
+    };
+    let candidates: Vec<String> = match key_env {
+        Some(v) => vec![v.to_string()],
+        None if !key_envs.is_empty() => key_envs,
+        None => vec!["OPENAI_API_KEY".into()],
+    };
+    let Some((used, key)) = candidates.iter().find_map(|v| {
+        std::env::var(v)
+            .ok()
+            .filter(|s| !s.is_empty())
+            .map(|s| (v.clone(), s))
+    }) else {
+        anyhow::bail!(
+            "未找到可用密钥环境变量（尝试过 {}）。请先配置其一，或运行 `icewright secret set-env <VAR>` 由软件代配",
+            candidates.join(", ")
+        );
+    };
+    println!("探测 {base}/models（密钥来自 {used}）…");
+    let ids =
+        icewright_core::providers::list_models(&base, &key, std::time::Duration::from_secs(20))?;
+    println!("在线可用模型 {} 个：", ids.len());
+    for id in &ids {
+        println!("  - {id}");
+    }
+    println!("选定后：`icewright model use <ws> <provider> --model <名>`");
+    Ok(())
+}
+
+fn cmd_model_use(ws_id: &str, provider_name: &str, model: Option<&str>) -> Result<()> {
+    let ws = Workspace::open(ws_id)?;
+    let p = icewright_core::providers::find(provider_name)?;
+    let chosen_model = model.unwrap_or(p.default_model.as_str()).to_string();
+    let cfg_path = ws.root.join("icewright.toml");
+    icewright_core::config::set_and_save(&cfg_path, "model.base_url", &p.base_url)?;
+    icewright_core::config::set_and_save(&cfg_path, "model.model", &chosen_model)?;
+    // 密钥引用：已配置就沿用；否则取第一个已存在的环境变量候选改为 env:// 引用
+    let cfg = ws.config()?;
+    if cfg.model.key_ref.trim().is_empty() {
+        let existing = p
+            .key_envs
+            .iter()
+            .find(|v| std::env::var(v).map(|s| !s.is_empty()).unwrap_or(false));
+        match existing {
+            Some(v) => {
+                let r = format!("env://{v}");
+                icewright_core::config::set_and_save(&cfg_path, "model.key_ref", &r)?;
+                println!("密钥引用：{r}（沿用已设置的环境变量）");
+            }
+            None => {
+                let v = p
+                    .key_envs
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| "OPENAI_API_KEY".into());
+                println!(
+                    "提示：未检测到 {v}。密钥请任选一种方式配置：\n  1) 用户自配：export {v}='sk-…'（写入 shell 启动文件）\n  2) 软件代配环境变量：echo 'sk-…' | icewright secret set-env {v}\n  3) 软件代存（keyring 文件，0600）：icewright secret set keyring://{ws_id}/model（stdin 输入）后 config set {ws_id} model.key_ref keyring://{ws_id}/model",
+                );
+                anyhow::bail!("model.key_ref 未配置且无可用环境变量，停止（接入点与模型名已写入）");
+            }
+        }
+    }
+    println!(
+        "已配置 {ws_id}：{} base_url={} model={}（文档 {}）",
+        p.display, p.base_url, chosen_model, p.docs_url
+    );
+    println!(
+        "下一步：`icewright model probe {ws_id}` 验证三件套，或 `icewright model discover {provider_name}` 查看在线模型名"
+    );
+    Ok(())
+}
+
+/// shell 单引号安全包裹
+fn sh_quote(v: &str) -> String {
+    format!("'{}'", v.replace('\'', "'\\''"))
+}
+
+fn cmd_secret_set_env(var: &str, shell_profile: Option<&str>) -> Result<()> {
+    secrets::SecretRef::parse(&format!("env://{var}")).context("环境变量名不合法")?;
+    let secret = secrets::read_secret_from_stdin()?;
+    let line = format!("export {var}={}\n", sh_quote(&secret));
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .context("无法确定用户主目录")?;
+    let env_dir = std::path::PathBuf::from(&home)
+        .join(".icewright")
+        .join("env");
+    std::fs::create_dir_all(&env_dir)?;
+    #[cfg(unix)]
+    std::fs::set_permissions(
+        &env_dir,
+        std::os::unix::fs::PermissionsExt::from_mode(0o700),
+    )?;
+    let env_file = env_dir.join("icewright.env");
+    // 同变量旧行替换，避免重复 export 遮蔽
+    let mut kept = String::new();
+    if env_file.exists() {
+        kept = std::fs::read_to_string(&env_file)?
+            .lines()
+            .filter(|l| !l.starts_with(&format!("export {var}=")))
+            .map(|l| format!("{l}\n"))
+            .collect();
+    }
+    kept.push_str(&line);
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&env_file)?;
+        f.write_all(kept.as_bytes())?;
+    }
+    #[cfg(not(unix))]
+    std::fs::write(&env_file, kept)?;
+    println!(
+        "已写入 {}（0600）。生效方式：source {}",
+        env_file.display(),
+        env_file.display()
+    );
+    if let Some(profile) = shell_profile {
+        let p = std::path::Path::new(profile);
+        let old = std::fs::read_to_string(p).unwrap_or_default();
+        let backup = format!("{}.bak-icewright", profile);
+        std::fs::write(&backup, &old)?;
+        let mut append = String::new();
+        if !old.contains(&format!("source {}", env_file.display())) {
+            append.push_str(&format!("\nsource {}\n", env_file.display()));
+        }
+        if !append.is_empty() {
+            use std::io::Write;
+            let mut f = std::fs::OpenOptions::new().append(true).open(p)?;
+            f.write_all(append.as_bytes())?;
+            println!("已让 {profile} source 该文件（原文件已备份到 {backup}）；新开终端即生效");
+        } else {
+            println!("{profile} 已包含 source，无需重复追加");
+        }
+    }
+    println!(
+        "随后：`icewright config set <ws> model.key_ref env://{var}`（或 `icewright model use <ws> <provider>` 自动引用）"
+    );
+    Ok(())
+}
+
 fn parse_role(s: Option<&str>) -> Result<Option<state::GateRole>> {
     match s {
         None => Ok(None),
@@ -444,9 +643,10 @@ fn cmd_design(action: &DesignAction) -> Result<()> {
     match action {
         DesignAction::Render { ws } => {
             let ws = Workspace::open(ws)?;
+            let had_prev = ws.artifact_path(design::DESIGN_DOC).exists();
             let (path, changed) = design::publish(&ws)?;
             println!("设计文档已渲染: {path}");
-            if changed {
+            if changed && had_prev {
                 println!("内容较上次有变化：既往闸门A 确认已作废，需重新确认");
             }
             println!(
@@ -541,9 +741,10 @@ fn cmd_delivery(action: &DeliveryAction) -> Result<()> {
     match action {
         DeliveryAction::Render { ws } => {
             let ws = Workspace::open(ws)?;
+            let had_prev = ws.artifact_path(delivery::DELIVERY_DOC).exists();
             let (path, changed) = delivery::publish(&ws)?;
             println!("交付报告已渲染: {path}");
-            if changed {
+            if changed && had_prev {
                 println!("内容较上次有变化：既往闸门B 确认已作废，需重新确认");
             }
             println!("审阅后执行 `icewright delivery approve|reject {}`", ws.id);
@@ -656,6 +857,9 @@ fn main() -> Result<()> {
         },
         Cmd::Secret { action } => match action {
             SecretAction::Set { r#ref } => cmd_secret_set(r#ref),
+            SecretAction::SetEnv { var, shell_profile } => {
+                cmd_secret_set_env(var, shell_profile.as_deref())
+            }
         },
         Cmd::Design { action } => cmd_design(action),
         Cmd::Generate { ws, out } => cmd_generate(ws, out.as_deref()),
@@ -664,6 +868,17 @@ fn main() -> Result<()> {
         Cmd::Evaluate { ws, url } => cmd_evaluate(ws, url),
         Cmd::Model { action } => match action {
             ModelAction::Probe { ws } => cmd_model_probe(ws),
+            ModelAction::Providers => cmd_model_providers(),
+            ModelAction::Discover {
+                provider,
+                url,
+                key_env,
+            } => cmd_model_discover(provider.as_deref(), url.as_deref(), key_env.as_deref()),
+            ModelAction::Use {
+                ws,
+                provider,
+                model,
+            } => cmd_model_use(ws, provider, model.as_deref()),
         },
         Cmd::Contract { action } => match action {
             ContractAction::Check => cmd_contract_check(),

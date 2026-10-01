@@ -7,6 +7,7 @@ pub mod extract;
 pub mod generate;
 pub mod model;
 pub mod preflight;
+pub mod providers;
 pub mod secrets;
 pub mod state;
 pub mod verify;

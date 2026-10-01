@@ -73,7 +73,7 @@ impl Kind {
             Kind::Apis => (
                 "外部核心系统接口契约提取器",
                 "1. 每个接口 id 形如 API-<域>-<含义>；鉴权只写 keyring:// 引用，绝不把凭证写进产物。\n\
-                 2. response.fields 每项的 dict_field 为 FLD-<名称>，用于衔接数据字典。\n\
+                 2. response.fields 每项的 dict_field 为 FLD-* id，仅允许 ASCII（^FLD-[A-Za-z0-9_-]+$，如 FLD-claim_status），用于衔接数据字典。\n\
                  3. mock_examples 至少给出一个成功场景，供离线评测。\n\
                  4. confirmed_by_customer 一律输出 false——接口真实存在与否由人工在闸门A确认，模型无权确认。",
             ),
@@ -234,6 +234,53 @@ fn id_list(value: Option<&Value>, kind: Kind) -> Vec<String> {
     arr.iter()
         .filter_map(|i| i[id_key].as_str().map(String::from))
         .collect()
+}
+
+/// apis 各接口 response.fields 声明的输出字段 id（去重升序）——
+/// 字典提取须以此作为"必须覆盖"清单，保证 apis→dict 引用闭环。
+fn declared_output_field_ids(apis: Option<&Value>) -> Vec<String> {
+    let mut ids: Vec<String> = arr_of(apis, "apis")
+        .iter()
+        .flat_map(|api| {
+            api["response"]["fields"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+        })
+        .filter_map(|f| f["dict_field"].as_str().map(String::from))
+        .collect();
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
+/// 字典缺失的接口输出字段（含声明来源提示）。字典模型即便拿到覆盖清单仍可能
+/// 自造字段 id，run() 用它做确定性对账回环，而不是再赌一次提示词。
+fn missing_field_hints(apis: &Value, dict: &Value) -> Vec<String> {
+    let dict_ids = id_list(Some(dict), Kind::Dictionary);
+    let mut out: Vec<String> = arr_of(Some(apis), "apis")
+        .iter()
+        .flat_map(|api| {
+            let aid = api["id"].as_str().unwrap_or("?").to_string();
+            api["response"]["fields"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+                .into_iter()
+                .map(move |f| (aid.clone(), f))
+        })
+        .filter_map(|(aid, f)| {
+            let df = f["dict_field"].as_str()?;
+            if dict_ids.iter().any(|x| x == df) {
+                return None;
+            }
+            let path = f["path"].as_str().unwrap_or("?");
+            Some(format!("{df} ← {aid}(response {path})"))
+        })
+        .collect();
+    out.sort();
+    out.dedup();
+    out
 }
 
 /// 转移条件 on 的引用形态。
@@ -555,6 +602,13 @@ where
                 if !flow_ids.is_empty() {
                     s.push_str(&format!("F-*: {}\n", flow_ids.join(", ")));
                 }
+                let fld_ids = declared_output_field_ids(current[0].as_ref());
+                if !fld_ids.is_empty() {
+                    s.push_str(&format!(
+                        "\n【接口输出已声明的字段 id——字典必须把这些字段逐个定义为条目（field 值原样使用），不得遗漏或改名】\n{}\n",
+                        fld_ids.join(", ")
+                    ));
+                }
                 s
             }
             Kind::Rules => {
@@ -569,6 +623,72 @@ where
         let value = extract_artifact(k, &corpus, &known_ids, 2, &mut chat)?;
         current[pos] = Some(value.clone());
         extracted.push((k, value));
+    }
+    // 对账回环：接口先提取、字典后提取，字典模型可能无视覆盖清单自造字段 id；
+    // 以实际 JSON 差集为准，把缺失字段回喂字典提取器定向补全（最多两轮）。
+    if kinds.contains(&Kind::Dictionary) && current[0].is_some() {
+        for _round in 0..2 {
+            let (Some(apis), Some(dict)) = (current[0].clone(), current[2].clone()) else {
+                break;
+            };
+            let hints = missing_field_hints(&apis, &dict);
+            if hints.is_empty() {
+                break;
+            }
+            let mut known = String::new();
+            let api_ids = id_list(current[0].as_ref(), Kind::Apis);
+            if !api_ids.is_empty() {
+                known.push_str(&format!("API-*: {}\n", api_ids.join(", ")));
+            }
+            let flow_ids = id_list(current[1].as_ref(), Kind::Flows);
+            if !flow_ids.is_empty() {
+                known.push_str(&format!("F-*: {}\n", flow_ids.join(", ")));
+            }
+            let user = format!(
+                "{corpus}\n\n【已确定的引用 id 白名单——引用时只允许使用下列 id，不得发明白名单外的 id】\n{known}\n\
+                 【当前已提取的字典 JSON】\n{}\n\
+                 【接口输出已声明、但字典尚未定义的字段（格式：字段id ← 声明它的接口与响应路径）】\n{}\n\
+                 请把上述缺失字段逐个追加为字典条目：条目必须用左侧 FLD id 原样作为 field 值，不得改名或另造新 id；\n\
+                 已有条目保持不变，只输出修正后的完整字典 JSON。",
+                serde_json::to_string(&dict)?,
+                hints.join("\n")
+            );
+            let mut messages = vec![
+                ChatMessage::system(&Kind::Dictionary.system_prompt()?),
+                ChatMessage::user(&user),
+            ];
+            let mut fixed: Option<Value> = None;
+            for _attempt in 0..=1 {
+                let raw = chat(&messages)?;
+                match parse_and_validate(Kind::Dictionary, &raw) {
+                    Ok(v) => {
+                        fixed = Some(v);
+                        break;
+                    }
+                    Err(errs) => {
+                        messages.push(ChatMessage {
+                            role: "assistant".into(),
+                            content: raw,
+                        });
+                        messages.push(ChatMessage::user(&format!(
+                            "你上一次的输出未通过 {} 契约校验，错误如下：\n{}\n\
+                             请修正后重新输出完整 JSON（只输出 JSON，不要解释）。",
+                            Kind::Dictionary.contract(),
+                            errs.join("\n")
+                        )));
+                    }
+                }
+            }
+            match fixed {
+                Some(v) => {
+                    if let Some(slot) = extracted.iter_mut().find(|(k, _)| *k == Kind::Dictionary) {
+                        slot.1 = v.clone();
+                    }
+                    current[2] = Some(v);
+                }
+                None => break,
+            }
+        }
     }
     let problems = cross_check(
         current[0].as_ref(),
@@ -758,6 +878,88 @@ mod tests {
             OnRef::Field("accident_is_injury")
         ));
         assert!(matches!(classify_on(">= 3"), OnRef::Unparsable));
+    }
+
+    #[test]
+    fn dictionary_prompt_receives_api_field_coverage_list() {
+        let base = std::env::temp_dir().join(format!("iw-ex-cov-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let ws = Workspace::create_at(&base, "ex-cov").unwrap();
+        std::fs::write(ws.root.join("corpus/规则.md"), "语料").unwrap();
+        let st0 = state::PipelineState::new("ex-cov", "run-20261001-0002", None);
+        state::save_state(&ws.state_path(), &st0).unwrap();
+
+        let mut dict_user_msgs = Vec::new();
+        let mut chat = |msgs: &[ChatMessage]| -> Result<String> {
+            if msgs[0].content.contains("字段字典提取器") {
+                dict_user_msgs.push(msgs[msgs.len() - 1].content.clone());
+            }
+            canned_chat(msgs)
+        };
+        run(&ws, &Kind::ORDER, &mut chat).unwrap();
+        assert_eq!(dict_user_msgs.len(), 1);
+        let user = &dict_user_msgs[0];
+        assert!(
+            user.contains("接口输出已声明的字段 id"),
+            "字典提示缺少必须覆盖清单"
+        );
+        let apis: Value = serde_json::from_str(&sample(Kind::Apis)).unwrap();
+        let declared = declared_output_field_ids(Some(&apis));
+        assert!(!declared.is_empty());
+        for id in declared {
+            assert!(user.contains(&id), "覆盖清单缺少 {id}");
+        }
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// 字典首轮输出缺少接口声明的字段 id 时，run() 应对账回喂并补全成功。
+    #[test]
+    fn run_reconciles_dictionary_missing_api_fields() {
+        let base = std::env::temp_dir().join(format!("iw-ex-rec-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let ws = Workspace::create_at(&base, "ex-rec").unwrap();
+        std::fs::write(ws.root.join("corpus/规则.md"), "语料").unwrap();
+        let st0 = state::PipelineState::new("ex-rec", "run-20261001-0003", None);
+        state::save_state(&ws.state_path(), &st0).unwrap();
+
+        let apis: Value = serde_json::from_str(&sample(Kind::Apis)).unwrap();
+        let declared = declared_output_field_ids(Some(&apis));
+        assert!(!declared.is_empty());
+        let mut short_dict: Value = serde_json::from_str(&sample(Kind::Dictionary)).unwrap();
+        let drop = declared[0].clone();
+        short_dict["fields"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|f| f["field"].as_str() != Some(drop.as_str()));
+        let short_raw = short_dict.to_string();
+
+        let mut rec_seen = 0usize;
+        let mut chat = |msgs: &[ChatMessage]| -> Result<String> {
+            let sys = &msgs[0].content;
+            let last = &msgs[msgs.len() - 1].content;
+            if sys.contains("字段字典提取器") {
+                if last.contains("字典尚未定义的字段") {
+                    rec_seen += 1;
+                    Ok(sample(Kind::Dictionary))
+                } else {
+                    Ok(short_raw.clone())
+                }
+            } else {
+                canned_chat(msgs)
+            }
+        };
+        let st = run(&ws, &Kind::ORDER, &mut chat).unwrap();
+        assert_eq!(rec_seen, 1, "应恰好触发一次对账回喂");
+        assert_eq!(st.stage(StageId::S3).unwrap().status, StageStatus::Approved);
+        let on_disk: Value = serde_json::from_str(
+            &std::fs::read_to_string(ws.artifact_path(DICTIONARY_ARTIFACT)).unwrap(),
+        )
+        .unwrap();
+        let ids = id_list(Some(&on_disk), Kind::Dictionary);
+        for f in &declared {
+            assert!(ids.contains(f), "补全后字典应包含 {f}");
+        }
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
