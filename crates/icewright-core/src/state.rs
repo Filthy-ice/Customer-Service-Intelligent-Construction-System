@@ -175,8 +175,8 @@ fn validate_against_contract(value: &Value) -> Result<()> {
 }
 
 pub fn load_state(path: &Path) -> Result<PipelineState> {
-    let raw = std::fs::read_to_string(path)
-        .with_context(|| format!("cannot read {}", path.display()))?;
+    let raw =
+        std::fs::read_to_string(path).with_context(|| format!("cannot read {}", path.display()))?;
     let value: Value = serde_json::from_str(&raw)?;
     validate_against_contract(&value)?;
     Ok(serde_json::from_value(value)?)
@@ -232,7 +232,9 @@ impl PipelineState {
     pub fn gate_is_current(&self, id: StageId) -> bool {
         match self.stage(id) {
             Some(s) => match (&s.gate, &s.output_hash) {
-                (Some(g), Some(out)) => g.decision == GateDecision::Approved && g.artifact_hash == *out,
+                (Some(g), Some(out)) => {
+                    g.decision == GateDecision::Approved && g.artifact_hash == *out
+                }
                 _ => false,
             },
             None => false,
@@ -259,7 +261,10 @@ mod tests {
     fn embedded_sample_round_trips() {
         let state: PipelineState = serde_json::from_value(sample()).unwrap();
         assert_eq!(state.current_stage, StageId::S4);
-        assert_eq!(state.stage(StageId::S4).unwrap().status, StageStatus::WaitingGate);
+        assert_eq!(
+            state.stage(StageId::S4).unwrap().status,
+            StageStatus::WaitingGate
+        );
         let value = serde_json::to_value(&state).unwrap();
         validate_against_contract(&value).unwrap();
     }
@@ -280,8 +285,14 @@ mod tests {
             Some("insurance/auto-claim@0.1.0"),
         );
         validate_against_contract(&serde_json::to_value(&state).unwrap()).unwrap();
-        assert_eq!(state.stage(StageId::S1).unwrap().status, StageStatus::Running);
-        assert_eq!(state.stage(StageId::S8).unwrap().status, StageStatus::Pending);
+        assert_eq!(
+            state.stage(StageId::S1).unwrap().status,
+            StageStatus::Running
+        );
+        assert_eq!(
+            state.stage(StageId::S8).unwrap().status,
+            StageStatus::Pending
+        );
         assert!(!state.gate_is_current(StageId::S4));
     }
 

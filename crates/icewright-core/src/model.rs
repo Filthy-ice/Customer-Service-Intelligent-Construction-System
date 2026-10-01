@@ -12,10 +12,16 @@ pub struct ChatMessage {
 
 impl ChatMessage {
     pub fn user(content: &str) -> Self {
-        Self { role: "user".into(), content: content.into() }
+        Self {
+            role: "user".into(),
+            content: content.into(),
+        }
     }
     pub fn system(content: &str) -> Self {
-        Self { role: "system".into(), content: content.into() }
+        Self {
+            role: "system".into(),
+            content: content.into(),
+        }
     }
 }
 
@@ -56,9 +62,7 @@ pub fn chat(
         .set("Authorization", &format!("Bearer {api_key}"))
         .send_json(body)
         .with_context(|| format!("模型端点请求失败 {url}"))?;
-    let value: serde_json::Value = resp
-        .into_json()
-        .context("模型端点返回的不是合法 JSON")?;
+    let value: serde_json::Value = resp.into_json().context("模型端点返回的不是合法 JSON")?;
     let content = value["choices"][0]["message"]["content"]
         .as_str()
         .context("响应缺少 choices[0].message.content")?
@@ -161,9 +165,8 @@ mod tests {
 
     #[test]
     fn json_mode_sets_response_format() {
-        let (base, rx) = fake_endpoint(
-            r#"{"choices":[{"message":{"content":"{}"}}],"model":"m1"}"#,
-        );
+        let (base, rx) =
+            fake_endpoint(r#"{"choices":[{"message":{"content":"{}"}}],"model":"m1"}"#);
         chat(
             &cfg(&base),
             "sk-fake",

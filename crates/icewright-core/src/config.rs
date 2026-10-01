@@ -44,8 +44,8 @@ pub fn load(path: &Path) -> Result<Config> {
 pub fn set_and_save(path: &Path, key: &str, value: &str) -> Result<Config> {
     let raw = std::fs::read_to_string(path)
         .with_context(|| format!("无法读取配置 {}", path.display()))?;
-    let mut root: toml::Value = toml::from_str(&raw)
-        .with_context(|| format!("配置格式错误 {}", path.display()))?;
+    let mut root: toml::Value =
+        toml::from_str(&raw).with_context(|| format!("配置格式错误 {}", path.display()))?;
     let mut cur = &mut root;
     for seg in key.split('.') {
         if seg.is_empty() {

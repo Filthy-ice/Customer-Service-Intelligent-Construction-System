@@ -118,11 +118,7 @@ pub fn load_corpus(ws_root: &Path) -> Result<String> {
 }
 
 /// S3 执行体：产物落盘 artifacts/rules.json，状态推进到 S4。
-pub fn record_s3(
-    ws: &Workspace,
-    corpus: &str,
-    rules: &Value,
-) -> Result<()> {
+pub fn record_s3(ws: &Workspace, corpus: &str, rules: &Value) -> Result<()> {
     let path = ws.state_path();
     if !path.exists() {
         bail!("请先 `icewright pipeline init {}`", ws.id);
@@ -141,7 +137,10 @@ pub fn record_s3(
         s.ended_at = Some(now);
         s.failures.clear();
     }
-    if st.current_stage == StageId::S1 || st.current_stage == StageId::S2 || st.current_stage == StageId::S3 {
+    if st.current_stage == StageId::S1
+        || st.current_stage == StageId::S2
+        || st.current_stage == StageId::S3
+    {
         st.current_stage = StageId::S4;
     }
     st.updated_at = Some(now);
@@ -156,11 +155,7 @@ pub fn dangling_field_refs(rules: &Value, dictionary: Option<&Value>) -> Vec<Str
     };
     let defined: Vec<&str> = dict["fields"]
         .as_array()
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|f| f["id"].as_str())
-                .collect()
-        })
+        .map(|arr| arr.iter().filter_map(|f| f["id"].as_str()).collect())
         .unwrap_or_default();
     let mut dangling = Vec::new();
     if let Some(rules_arr) = rules["rules"].as_array() {
@@ -219,7 +214,10 @@ where
         .and_then(|s| serde_json::from_str::<Value>(&s).ok());
     let dangling = dangling_field_refs(&rules, dict.as_ref());
     if !dangling.is_empty() {
-        bail!("悬空字段引用（需先补数据字典或修正条件）：\n{}", dangling.join("\n"));
+        bail!(
+            "悬空字段引用（需先补数据字典或修正条件）：\n{}",
+            dangling.join("\n")
+        );
     }
     record_s3(ws, &corpus, &rules)?;
     state::load_state(&ws.state_path())

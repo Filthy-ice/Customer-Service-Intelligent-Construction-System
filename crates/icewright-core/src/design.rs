@@ -28,17 +28,15 @@ fn mask_endpoint(base_url: &str) -> String {
 /// 确定性渲染设计文档（不调用模型）：S5 生成前闸门A 的审阅对象。
 pub fn render_design(ws: &Workspace) -> Result<String> {
     let cfg = ws.config()?;
-    let rules = load_json(ws, RULES_ARTIFACT)?.context("缺少 artifacts/rules.json，先跑 S3 提取")?;
+    let rules =
+        load_json(ws, RULES_ARTIFACT)?.context("缺少 artifacts/rules.json，先跑 S3 提取")?;
     let rules_arr = rules["rules"]
         .as_array()
         .context("rules.json 结构异常：rules 不是数组")?;
 
     let mut by_enforcement: BTreeMap<&str, usize> = BTreeMap::new();
     let mut out = String::new();
-    out.push_str(&format!(
-        "# 设计方案 · {}（run 产物）\n\n",
-        ws.id
-    ));
+    out.push_str(&format!("# 设计方案 · {}（run 产物）\n\n", ws.id));
     out.push_str("## 1. 系统概览\n\n");
     out.push_str(&format!("- 行业包：{}\n", nv(&cfg.workspace.pack)));
     out.push_str(&format!("- 目标栈：{}\n", cfg.workspace.stack));
@@ -80,7 +78,10 @@ pub fn render_design(ws: &Workspace) -> Result<String> {
             out.push_str(&format!(
                 "- {}（来源 {}）\n",
                 f["id"].as_str().unwrap_or("?"),
-                f["source"]["kind"].as_str().or(f["source"].as_str()).unwrap_or("?")
+                f["source"]["kind"]
+                    .as_str()
+                    .or(f["source"].as_str())
+                    .unwrap_or("?")
             ));
         }
     } else {
@@ -180,8 +181,8 @@ pub fn decide(
     note: Option<&str>,
 ) -> Result<()> {
     let path = ws.state_path();
-    let mut st = state::load_state(&path)
-        .context("请先 `icewright design render`（S4 尚无产物）")?;
+    let mut st =
+        state::load_state(&path).context("请先 `icewright design render`（S4 尚无产物）")?;
     if decision == GateDecision::Rejected && note.map(|n| n.trim().is_empty()).unwrap_or(true) {
         bail!("驳回必须附注原因（--note）");
     }
@@ -194,10 +195,7 @@ pub fn decide(
     if s.status != StageStatus::WaitingGate {
         bail!("S4 当前状态为 {:?}，不在等待确认", s.status);
     }
-    let artifact_hash = s
-        .output_hash
-        .clone()
-        .context("S4 缺少 output_hash")?;
+    let artifact_hash = s.output_hash.clone().context("S4 缺少 output_hash")?;
     s.gate = Some(GateRecord {
         decision,
         by: by.to_string(),
@@ -240,7 +238,11 @@ mod tests {
             serde_json::to_string_pretty(&rules).unwrap(),
         )
         .unwrap();
-        let st = PipelineState::new("ds-test", "run-20261001-0001", Some("insurance/auto-claim@0.1.0"));
+        let st = PipelineState::new(
+            "ds-test",
+            "run-20261001-0001",
+            Some("insurance/auto-claim@0.1.0"),
+        );
         let mut st = st;
         st.stages
             .iter_mut()
@@ -257,10 +259,20 @@ mod tests {
         let (path, changed) = publish(&ws).unwrap();
         assert!(changed && path.contains("design.md"));
         let st = state::load_state(&ws.state_path()).unwrap();
-        assert_eq!(st.stage(StageId::S4).unwrap().status, StageStatus::WaitingGate);
+        assert_eq!(
+            st.stage(StageId::S4).unwrap().status,
+            StageStatus::WaitingGate
+        );
         assert!(!st.gate_is_current(StageId::S4));
 
-        decide(&ws, GateDecision::Approved, "张三", Some(GateRole::BusinessOwner), None).unwrap();
+        decide(
+            &ws,
+            GateDecision::Approved,
+            "张三",
+            Some(GateRole::BusinessOwner),
+            None,
+        )
+        .unwrap();
         let st = state::load_state(&ws.state_path()).unwrap();
         assert!(st.gate_is_current(StageId::S4));
         assert_eq!(st.current_stage, StageId::S5);
@@ -268,7 +280,10 @@ mod tests {
         // 产物变更后旧确认失效
         publish(&ws).unwrap();
         let st = state::load_state(&ws.state_path()).unwrap();
-        assert_eq!(st.stage(StageId::S4).unwrap().status, StageStatus::WaitingGate);
+        assert_eq!(
+            st.stage(StageId::S4).unwrap().status,
+            StageStatus::WaitingGate
+        );
         assert!(!st.gate_is_current(StageId::S4));
         let _ = std::fs::remove_dir_all(&base);
     }
@@ -278,8 +293,14 @@ mod tests {
         let (ws, base) = ws_with_rules("reject");
         publish(&ws).unwrap();
         assert!(decide(&ws, GateDecision::Rejected, "李四", None, None).is_err());
-        decide(&ws, GateDecision::Rejected, "李四", None, Some("时限数字需与法务核对"))
-            .unwrap();
+        decide(
+            &ws,
+            GateDecision::Rejected,
+            "李四",
+            None,
+            Some("时限数字需与法务核对"),
+        )
+        .unwrap();
         let st = state::load_state(&ws.state_path()).unwrap();
         assert_eq!(st.stage(StageId::S4).unwrap().status, StageStatus::Failed);
         let _ = std::fs::remove_dir_all(&base);

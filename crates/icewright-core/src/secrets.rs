@@ -98,8 +98,8 @@ pub fn store(r: &SecretRef, secret: &str) -> Result<()> {
 
 pub fn resolve_at(root: &Path, r: &SecretRef) -> Result<String> {
     let path = file_for(root, r);
-    let raw = std::fs::read_to_string(&path)
-        .with_context(|| format!("密钥不存在: {}", r.to_uri()))?;
+    let raw =
+        std::fs::read_to_string(&path).with_context(|| format!("密钥不存在: {}", r.to_uri()))?;
     Ok(raw)
 }
 

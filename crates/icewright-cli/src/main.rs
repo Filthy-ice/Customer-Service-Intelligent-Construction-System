@@ -75,7 +75,11 @@ enum ConfigAction {
     /// 打印生效配置（icewright.toml 原文）
     Show { ws: String },
     /// 设置点号键，如 `config set <ws> model.base_url https://...`
-    Set { ws: String, key: String, value: String },
+    Set {
+        ws: String,
+        key: String,
+        value: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -150,7 +154,7 @@ fn next_run_id(ws_dir: &std::path::Path, date: &str) -> String {
             let name = e.file_name().to_string_lossy().to_string();
             if let Some(rest) = name.strip_prefix(&prefix) {
                 let num = rest.strip_suffix(".json").unwrap_or(rest);
-                if let Some(num) = num.parse::<u32>().ok() {
+                if let Ok(num) = num.parse::<u32>() {
                     max_seq = max_seq.max(num);
                 }
             }
@@ -183,7 +187,9 @@ fn cmd_pipeline_init(ws_id: &str) -> Result<()> {
         println!("提示：workspace.pack 未填写，后续 S3 起需要行业包引用");
     }
     if cfg.model.base_url.trim().is_empty() {
-        println!("提示：模型未配置，进入 S3 前需完成 `icewright config set` 与 `icewright secret set`");
+        println!(
+            "提示：模型未配置，进入 S3 前需完成 `icewright config set` 与 `icewright secret set`"
+        );
     }
     Ok(())
 }
@@ -197,12 +203,11 @@ fn cmd_config_show(ws_id: &str) -> Result<()> {
 
 fn cmd_config_set(ws_id: &str, key: &str, value: &str) -> Result<()> {
     let ws = Workspace::open(ws_id)?;
-    let cfg = icewright_core::config::set_and_save(
-        &ws.root.join("icewright.toml"),
-        key,
-        value,
-    )?;
-    println!("已设置 {key}（当前 model={} workspace.stack={}）", cfg.model.model, cfg.workspace.stack);
+    let cfg = icewright_core::config::set_and_save(&ws.root.join("icewright.toml"), key, value)?;
+    println!(
+        "已设置 {key}（当前 model={} workspace.stack={}）",
+        cfg.model.model, cfg.workspace.stack
+    );
     Ok(())
 }
 
@@ -243,25 +248,29 @@ fn cmd_pipeline_extract(ws_id: &str) -> Result<()> {
         anyhow::bail!("请先 `icewright pipeline init {ws_id}`");
     }
     let st_before = state::load_state(&ws.state_path())?;
-    if st_before.stage(state::StageId::S2).unwrap().status
-        != state::StageStatus::Approved
-    {
+    if st_before.stage(state::StageId::S2).unwrap().status != state::StageStatus::Approved {
         anyhow::bail!("S2 预检未通过，禁止进入 S3：先运行 `icewright pipeline preflight {ws_id}`");
     }
     let cfg = ws.require_configured()?;
     let key = secrets::resolve(&secrets::SecretRef::parse(&cfg.model.key_ref)?)?;
     let st = icewright_core::extract::run(&ws, |msgs| {
-        icewright_core::model::chat(&cfg.model, &key, msgs, false, std::time::Duration::from_secs(120))
-            .map(|o| o.content)
+        icewright_core::model::chat(
+            &cfg.model,
+            &key,
+            msgs,
+            false,
+            std::time::Duration::from_secs(120),
+        )
+        .map(|o| o.content)
     })?;
-    let rules: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(ws.artifact_path(
-            icewright_core::extract::RULES_ARTIFACT,
-        ))?)?;
+    let rules: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(
+        ws.artifact_path(icewright_core::extract::RULES_ARTIFACT),
+    )?)?;
     let n = rules["rules"].as_array().map(|a| a.len()).unwrap_or(0);
     println!(
         "S3 完成：提取 {n} 条规则 → {}；当前阶段 {:?}",
-        ws.artifact_path(icewright_core::extract::RULES_ARTIFACT).display(),
+        ws.artifact_path(icewright_core::extract::RULES_ARTIFACT)
+            .display(),
         st.current_stage
     );
     println!("下一步：`icewright design render {ws_id}` 生成设计文档供闸门A确认");
@@ -309,7 +318,9 @@ fn cmd_model_probe(ws_id: &str) -> Result<()> {
     let out = icewright_core::model::chat(
         &cfg.model,
         &key,
-        &[icewright_core::model::ChatMessage::user("接入探测：请只回复 pong")],
+        &[icewright_core::model::ChatMessage::user(
+            "接入探测：请只回复 pong",
+        )],
         false,
         std::time::Duration::from_secs(20),
     )?;
@@ -352,21 +363,40 @@ fn cmd_design(action: &DesignAction) -> Result<()> {
             if changed {
                 println!("内容较上次有变化：既往闸门A 确认已作废，需重新确认");
             }
-            println!("审阅后执行 `icewright design approve|reject {ws_id}`", ws_id = ws.id);
+            println!(
+                "审阅后执行 `icewright design approve|reject {ws_id}`",
+                ws_id = ws.id
+            );
         }
         DesignAction::Show { ws } => {
             let ws = Workspace::open(ws)?;
             let p = ws.artifact_path(design::DESIGN_DOC);
-            print!("{}", std::fs::read_to_string(&p).unwrap_or_else(|_| format!("尚未渲染: {}", p.display())));
+            print!(
+                "{}",
+                std::fs::read_to_string(&p)
+                    .unwrap_or_else(|_| format!("尚未渲染: {}", p.display()))
+            );
         }
         DesignAction::Approve { ws, by, note, role } => {
             let ws = Workspace::open(ws)?;
-            design::decide(&ws, state::GateDecision::Approved, by, parse_role(role.as_deref())?, note.as_deref())?;
+            design::decide(
+                &ws,
+                state::GateDecision::Approved,
+                by,
+                parse_role(role.as_deref())?,
+                note.as_deref(),
+            )?;
             println!("闸门A 已批准（绑定当前产物哈希）。下一步：S5 代码生成");
         }
         DesignAction::Reject { ws, by, note, role } => {
             let ws = Workspace::open(ws)?;
-            design::decide(&ws, state::GateDecision::Rejected, by, parse_role(role.as_deref())?, Some(note))?;
+            design::decide(
+                &ws,
+                state::GateDecision::Rejected,
+                by,
+                parse_role(role.as_deref())?,
+                Some(note),
+            )?;
             println!("闸门A 已驳回：{note}");
             println!("修订语料/产物后重新 `icewright design render {}`", ws.id);
         }

@@ -38,9 +38,7 @@ pub fn split_base_url(base: &str) -> Result<(bool, String, u16), String> {
     }
     let (host, port) = match authority.rsplit_once(':') {
         Some((h, p)) if !h.is_empty() => {
-            let port = p
-                .parse::<u16>()
-                .map_err(|_| format!("端口非法: {p:?}"))?;
+            let port = p.parse::<u16>().map_err(|_| format!("端口非法: {p:?}"))?;
             (h.to_string(), port)
         }
         _ => (authority.to_string(), if tls { 443 } else { 80 }),
@@ -52,14 +50,17 @@ fn tcp_reachable(host: &str, port: u16, timeout: Duration) -> Result<(), String>
     let addrs = (host, port)
         .to_socket_addrs()
         .map_err(|e| format!("DNS 解析失败 {host}:{port}: {e}"))?;
-    let last = addrs
-        .filter_map(|a| TcpStream::connect_timeout(&a, timeout).err())
-        .last()
-        .map(|e| format!("无法连接 {host}:{port}: {e}"));
-    match last {
-        None => Ok(()),
-        Some(err) => Err(err),
+    let mut last_err = None;
+    for addr in addrs {
+        match TcpStream::connect_timeout(&addr, timeout) {
+            Ok(_) => return Ok(()),
+            Err(e) => last_err = Some(e),
+        }
     }
+    Err(match last_err {
+        Some(e) => format!("无法连接 {host}:{port}: {e}"),
+        None => format!("{host}:{port} 无解析地址"),
+    })
 }
 
 fn corpus_has_files(ws: &Workspace) -> Result<bool> {
@@ -112,7 +113,10 @@ pub fn run(ws: &Workspace, secrets_root: &Path) -> Result<Vec<Check>> {
             Err(_) => Check::new(
                 "model_key",
                 false,
-                format!("{} 引用了但本机无此密钥，用 `icewright secret set` 写入", r.to_uri()),
+                format!(
+                    "{} 引用了但本机无此密钥，用 `icewright secret set` 写入",
+                    r.to_uri()
+                ),
             ),
         },
     };
@@ -152,16 +156,15 @@ pub fn run_and_record(ws: &Workspace, secrets_root: &Path) -> Result<(Vec<Check>
     };
 
     let now = Utc::now();
-    let corpus_ok = checks
-        .iter()
-        .any(|c| c.name == "corpus" && c.ok);
+    let corpus_ok = checks.iter().any(|c| c.name == "corpus" && c.ok);
     let cfg_raw = std::fs::read(ws.root.join("icewright.toml"))?;
     for s in &mut st.stages {
-        if s.id == StageId::S1 {
-            if corpus_ok && matches!(s.status, StageStatus::Pending | StageStatus::Running) {
-                s.status = StageStatus::Approved;
-                s.ended_at = Some(now);
-            }
+        if s.id == StageId::S1
+            && corpus_ok
+            && matches!(s.status, StageStatus::Pending | StageStatus::Running)
+        {
+            s.status = StageStatus::Approved;
+            s.ended_at = Some(now);
         }
         if s.id == StageId::S2 {
             s.input_hash = Some(state::input_hash(&[&cfg_raw]));
@@ -224,10 +227,7 @@ mod tests {
         let mut cfg = std::fs::read_to_string(ws.root.join("icewright.toml")).unwrap();
         cfg = cfg.replace("base_url = \"\"", "base_url = \"http://127.0.0.1:1\"");
         cfg = cfg.replace("model = \"\"", "model = \"test-model\"");
-        cfg = cfg.replace(
-            "key_ref = \"\"",
-            "key_ref = \"keyring://pf/test\"",
-        );
+        cfg = cfg.replace("key_ref = \"\"", "key_ref = \"keyring://pf/test\"");
         cfg = cfg.replace("pack = \"\"", "pack = \"insurance/auto-claim@0.1.0\"");
         std::fs::write(ws.root.join("icewright.toml"), cfg).unwrap();
         std::fs::write(ws.root.join("corpus/需求.md"), "车险理赔规则").unwrap();
@@ -240,8 +240,12 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
         let sroot = base.join("secrets");
         let ws = make_ws(&base);
-        secrets::store_at(&sroot, &SecretRef::parse("keyring://pf/test").unwrap(), "sk")
-            .unwrap();
+        secrets::store_at(
+            &sroot,
+            &SecretRef::parse("keyring://pf/test").unwrap(),
+            "sk",
+        )
+        .unwrap();
 
         let checks = run(&ws, &sroot).unwrap();
         let get = |n: &str| checks.iter().find(|c| c.name == n).unwrap().ok;
@@ -288,7 +292,10 @@ mod tests {
 
     fn icewright_core_set_stack_url(ws: &Workspace, url: &str) {
         let raw = std::fs::read_to_string(ws.root.join("icewright.toml")).unwrap();
-        let raw = raw.replace("base_url = \"http://127.0.0.1:1\"", &format!("base_url = \"{url}\""));
+        let raw = raw.replace(
+            "base_url = \"http://127.0.0.1:1\"",
+            &format!("base_url = \"{url}\""),
+        );
         std::fs::write(ws.root.join("icewright.toml"), raw).unwrap();
     }
 }
