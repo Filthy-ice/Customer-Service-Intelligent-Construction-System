@@ -306,12 +306,32 @@ fn render(tpl: &str, rel: &str, slots: &Slots) -> Result<String> {
     Ok(out)
 }
 
+#[derive(Debug, Default)]
+pub struct FileDiff {
+    pub created: Vec<String>,
+    pub modified: Vec<String>,
+    pub unchanged: Vec<String>,
+    /// 上一轮由引擎写出、本轮模板集不再包含的文件（只报告不删除）
+    pub removed: Vec<String>,
+}
+
 #[derive(Debug)]
 pub struct GenerateReport {
     pub out_dir: PathBuf,
     pub written: Vec<String>,
     pub preserved: Vec<String>,
+    pub diff: FileDiff,
     pub output_hash: String,
+}
+
+/// 引擎自记的文件清单（S8 增量对比基准），与生成工程解耦，不参与 output_hash。
+const MANIFEST_FILE: &str = "ICEWRIGHT-MANIFEST.json";
+
+fn load_manifest(out_dir: &Path) -> Vec<String> {
+    std::fs::read_to_string(out_dir.join(MANIFEST_FILE))
+        .ok()
+        .and_then(|raw| serde_json::from_str::<Vec<String>>(&raw).ok())
+        .unwrap_or_default()
 }
 
 fn has_custom_marker(path: &Path) -> bool {
@@ -417,32 +437,72 @@ pub fn generate(ws: &Workspace, out_dir: &Path) -> Result<GenerateReport> {
         engine_version: ENGINE_VERSION.to_string(),
     };
 
-    let mut written = Vec::new();
-    let mut preserved = Vec::new();
-    let mut hashed: Vec<String> = Vec::new();
+    /// 一轮生成的累积结果：分类 diff、哈希材料、引擎管理文件清单。
+    struct Outcome {
+        written: Vec<String>,
+        preserved: Vec<String>,
+        diff: FileDiff,
+        managed: Vec<String>,
+        hashed: Vec<String>,
+    }
+    impl Outcome {
+        fn place(&mut self, out_dir: &Path, rel: String, content: String) -> Result<()> {
+            let target = out_dir.join(&rel);
+            match std::fs::read_to_string(&target).ok() {
+                Some(old) if old == content => self.diff.unchanged.push(rel.clone()),
+                Some(_) => {
+                    if let Some(parent) = target.parent() {
+                        std::fs::create_dir_all(parent)?;
+                    }
+                    std::fs::write(&target, &content)?;
+                    self.diff.modified.push(rel.clone());
+                    self.written.push(rel.clone());
+                }
+                None => {
+                    if let Some(parent) = target.parent() {
+                        std::fs::create_dir_all(parent)?;
+                    }
+                    std::fs::write(&target, &content)?;
+                    self.diff.created.push(rel.clone());
+                    self.written.push(rel.clone());
+                }
+            }
+            self.hashed.push(format!("{rel}\n{content}"));
+            self.managed.push(rel);
+            Ok(())
+        }
+
+        /// 定制文件保留原文，只纳入哈希与管理清单。
+        fn preserve(&mut self, out_dir: &Path, rel: &str) {
+            self.preserved.push(rel.to_string());
+            self.managed.push(rel.to_string());
+            if let Ok(raw) = std::fs::read_to_string(out_dir.join(rel)) {
+                self.hashed.push(format!("{rel}\n{raw}"));
+            }
+        }
+    }
+    let prev_manifest = load_manifest(out_dir);
+    let mut o = Outcome {
+        written: Vec::new(),
+        preserved: Vec::new(),
+        diff: FileDiff::default(),
+        managed: Vec::new(),
+        hashed: Vec::new(),
+    };
     for (rel, tpl) in templates {
         let target = out_dir.join(rel);
         if target.exists() && has_custom_marker(&target) {
-            preserved.push(rel.to_string());
-            if let Ok(raw) = std::fs::read_to_string(&target) {
-                hashed.push(format!("{rel}\n{raw}"));
-            }
+            o.preserve(out_dir, rel);
             continue;
         }
         let content = render(tpl, rel, &slots)?;
-        if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(&target, &content)?;
-        written.push(rel.to_string());
-        hashed.push(format!("{rel}\n{content}"));
+        o.place(out_dir, rel.to_string(), content)?;
     }
 
     // 规则产物编译进项目（数据不是模板，重生成始终覆盖）
-    hashed.push(format!("{data_rel}/rules.json\n{rules_raw}"));
     let data_dir = out_dir.join(data_rel);
     std::fs::create_dir_all(&data_dir)?;
-    std::fs::write(data_dir.join("rules.json"), &rules_raw)?;
+    o.place(out_dir, format!("{data_rel}/rules.json"), rules_raw.clone())?;
     // go 栈的 //go:embed 要求 skills.json 物理存在：无技能产物时写出默认空表
     let skills_effective: &str = match &skills_raw {
         Some(raw) => raw,
@@ -450,12 +510,36 @@ pub fn generate(ws: &Workspace, out_dir: &Path) -> Result<GenerateReport> {
         None => "",
     };
     if !skills_effective.is_empty() {
-        hashed.push(format!("{data_rel}/skills.json\n{skills_effective}"));
-        std::fs::write(data_dir.join("skills.json"), skills_effective)?;
+        o.place(
+            out_dir,
+            format!("{data_rel}/skills.json"),
+            skills_effective.to_string(),
+        )?;
     }
+    // 上一轮引擎管理、本轮不再产出的文件：只报告，不删除（用户可能已挪作他用）
+    o.diff.removed = prev_manifest
+        .iter()
+        .filter(|f| *f != MANIFEST_FILE && !o.managed.contains(f))
+        .cloned()
+        .collect();
+    for list in [
+        &mut o.diff.created,
+        &mut o.diff.modified,
+        &mut o.diff.unchanged,
+        &mut o.diff.removed,
+    ] {
+        list.sort();
+    }
+    o.managed.push(MANIFEST_FILE.to_string());
+    o.managed.sort();
+    std::fs::write(
+        out_dir.join(MANIFEST_FILE),
+        serde_json::to_string_pretty(&o.managed)?,
+    )?;
 
-    hashed.sort();
-    let output_hash = state::sha256_hex(hashed.join("\n---\n").as_bytes());
+    o.hashed.sort();
+    let output_hash = state::sha256_hex(o.hashed.join("\n---\n").as_bytes());
+    let (written, preserved, diff) = (o.written, o.preserved, o.diff);
 
     let cfg_raw = std::fs::read(ws.root.join("icewright.toml"))?;
     let template_bytes: Vec<&[u8]> = templates.iter().map(|(_, t)| t.as_bytes()).collect();
@@ -485,6 +569,7 @@ pub fn generate(ws: &Workspace, out_dir: &Path) -> Result<GenerateReport> {
         out_dir: out_dir.to_path_buf(),
         written,
         preserved,
+        diff,
         output_hash,
     })
 }
@@ -567,7 +652,11 @@ mod tests {
         let out = ws.root.join("output");
         let report = generate(&ws, &out).unwrap();
         assert!(report.preserved.is_empty());
-        assert_eq!(report.written.len(), TEMPLATES_PY.len());
+        assert_eq!(
+            report.written.len(),
+            TEMPLATES_PY.len() + 1,
+            "模板 + rules.json"
+        );
         let main_py = std::fs::read_to_string(out.join("app/main.py")).unwrap();
         assert!(main_py.contains(&ws.id), "project_name 槽位应渲染");
         assert!(!main_py.contains("{{"));
@@ -598,6 +687,58 @@ mod tests {
             std::fs::read_to_string(out.join("app/main.py")).unwrap(),
             "# ICEWRIGHT-CUSTOM\nMY CODE\n"
         );
+    }
+
+    #[test]
+    fn s8_diff_classifies_changes_and_removals() {
+        let ws = setup("diff");
+        let out = ws.root.join("output");
+        let r1 = generate(&ws, &out).unwrap();
+        // 首轮：模板 + rules.json 全部新建
+        assert_eq!(r1.diff.created.len(), TEMPLATES_PY.len() + 1);
+        assert!(r1.diff.modified.is_empty());
+        assert!(r1.diff.unchanged.is_empty());
+        assert!(r1.diff.removed.is_empty());
+
+        // 二轮无变化：全部 unchanged，哈希一致
+        let r2 = generate(&ws, &out).unwrap();
+        assert!(r2.diff.created.is_empty());
+        assert_eq!(r2.diff.unchanged.len(), TEMPLATES_PY.len() + 1);
+        assert_eq!(r2.output_hash, r1.output_hash);
+
+        // 修改规则产物 → 只有数据文件被报为更新
+        let mut rules = icewright_artifact::example("rules").unwrap();
+        rules["rules"][0]["statement"] = serde_json::json!("变更后的规则文案");
+        std::fs::write(
+            ws.artifact_path(RULES_ARTIFACT),
+            serde_json::to_string_pretty(&rules).unwrap(),
+        )
+        .unwrap();
+        let r3 = generate(&ws, &out).unwrap();
+        assert_eq!(r3.diff.modified, vec![format!("{}/rules.json", "app/data")]);
+        assert!(r3.diff.created.is_empty());
+
+        // 定制文件不进任何 diff 分类、内容不被触碰
+        std::fs::write(out.join("static/chat.html"), "# ICEWRIGHT-CUSTOM\nKEEP\n").unwrap();
+        let r4 = generate(&ws, &out).unwrap();
+        assert_eq!(r4.preserved, vec!["static/chat.html".to_string()]);
+        for list in [&r4.diff.created, &r4.diff.modified, &r4.diff.unchanged] {
+            assert!(!list.iter().any(|f| f.contains("chat.html")));
+        }
+        assert_eq!(
+            std::fs::read_to_string(out.join("static/chat.html")).unwrap(),
+            "# ICEWRIGHT-CUSTOM\nKEEP\n"
+        );
+
+        // 上轮管理、本轮不再产出的文件 → removed（只报告不删除）
+        let manifest_path = out.join(MANIFEST_FILE);
+        let mut manifest: Vec<String> =
+            serde_json::from_str(&std::fs::read_to_string(&manifest_path).unwrap()).unwrap();
+        manifest.push("app/zombie.py".to_string());
+        std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
+        let r5 = generate(&ws, &out).unwrap();
+        assert!(r5.diff.removed.contains(&"app/zombie.py".to_string()));
+        assert!(!out.join("app/zombie.py").exists());
     }
 
     #[test]
@@ -709,7 +850,11 @@ mod tests {
         std::fs::write(&cfg_path, raw).unwrap();
         let out = ws.root.join("output");
         let report = generate(&ws, &out).unwrap();
-        assert_eq!(report.written.len(), TEMPLATES_GO.len());
+        assert_eq!(
+            report.written.len(),
+            TEMPLATES_GO.len() + 2,
+            "模板 + rules.json + 默认 skills.json"
+        );
         assert!(
             !out.join("app/main.py").exists(),
             "go 栈不得写出 python 骨架"
@@ -761,7 +906,11 @@ mod tests {
         std::fs::write(&cfg_path, raw).unwrap();
         let out = ws.root.join("output");
         let report = generate(&ws, &out).unwrap();
-        assert_eq!(report.written.len(), TEMPLATES_JAVA.len());
+        assert_eq!(
+            report.written.len(),
+            TEMPLATES_JAVA.len() + 1,
+            "模板 + rules.json"
+        );
         assert!(
             !out.join("app/main.py").exists(),
             "java 栈不得写出 python 骨架"

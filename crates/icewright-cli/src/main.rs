@@ -618,20 +618,7 @@ fn cmd_build(ws_id: &str) -> Result<()> {
     } else {
         println!("{}", t("build_s5"));
         let report = icewright_core::generate::generate(&ws, &out_dir)?;
-        println!(
-            "{}",
-            tf(
-                "gen_done",
-                &[
-                    ("n", &report.written.len().to_string()),
-                    ("dir", &report.out_dir.display().to_string()),
-                    ("hash", &report.output_hash[7..15]),
-                ]
-            )
-        );
-        for f in &report.preserved {
-            println!("{}", tf("gen_preserved", &[("f", f)]));
-        }
+        print_gen_report(&report);
         st = state::load_state(&ws.state_path())?;
     }
 
@@ -972,13 +959,8 @@ fn cmd_design(action: &DesignAction) -> Result<()> {
     Ok(())
 }
 
-fn cmd_generate(ws_id: &str, out: Option<&str>) -> Result<()> {
-    let ws = open_ws(ws_id)?;
-    let out_dir = match out {
-        Some(p) => std::path::PathBuf::from(p),
-        None => ws.root.join("output"),
-    };
-    let report = icewright_core::generate::generate(&ws, &out_dir)?;
+/// 生成结果通用输出：概览 + 增量 diff 分类 + 定制保留（generate 与 build 共用）。
+fn print_gen_report(report: &icewright_core::generate::GenerateReport) {
     println!(
         "{}",
         tf(
@@ -990,9 +972,40 @@ fn cmd_generate(ws_id: &str, out: Option<&str>) -> Result<()> {
             ]
         )
     );
+    println!(
+        "{}",
+        tf(
+            "gen_diff",
+            &[
+                ("c", &report.diff.created.len().to_string()),
+                ("m", &report.diff.modified.len().to_string()),
+                ("u", &report.diff.unchanged.len().to_string()),
+                ("r", &report.diff.removed.len().to_string()),
+            ]
+        )
+    );
+    for f in &report.diff.created {
+        println!("{}", tf("gen_created", &[("f", f)]));
+    }
+    for f in &report.diff.modified {
+        println!("{}", tf("gen_modified", &[("f", f)]));
+    }
+    for f in &report.diff.removed {
+        println!("{}", tf("gen_removed", &[("f", f)]));
+    }
     for f in &report.preserved {
         println!("{}", tf("gen_preserved", &[("f", f)]));
     }
+}
+
+fn cmd_generate(ws_id: &str, out: Option<&str>) -> Result<()> {
+    let ws = open_ws(ws_id)?;
+    let out_dir = match out {
+        Some(p) => std::path::PathBuf::from(p),
+        None => ws.root.join("output"),
+    };
+    let report = icewright_core::generate::generate(&ws, &out_dir)?;
+    print_gen_report(&report);
     println!("{}", t("gen_next"));
     Ok(())
 }
