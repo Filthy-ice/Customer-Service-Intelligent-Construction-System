@@ -1,4 +1,5 @@
 pub mod config;
+pub mod secrets;
 pub mod state;
 pub mod workspace;
 

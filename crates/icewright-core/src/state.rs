@@ -191,6 +191,39 @@ pub fn save_state(path: &Path, state: &PipelineState) -> Result<()> {
 }
 
 impl PipelineState {
+    /// Fresh run: S1 running, S2..S8 pending.
+    pub fn new(workspace: &str, run_id: &str, pack_ref: Option<&str>) -> Self {
+        Self {
+            schema_version: icewright_artifact::SCHEMA_VERSION.to_string(),
+            workspace: workspace.to_string(),
+            run_id: run_id.to_string(),
+            engine_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+            pack_ref: pack_ref.map(|s| s.to_string()),
+            current_stage: StageId::S1,
+            updated_at: Some(Utc::now()),
+            stages: StageId::ALL
+                .iter()
+                .enumerate()
+                .map(|(i, id)| StageState {
+                    id: *id,
+                    status: if i == 0 {
+                        StageStatus::Running
+                    } else {
+                        StageStatus::Pending
+                    },
+                    input_hash: None,
+                    output_hash: None,
+                    started_at: if i == 0 { Some(Utc::now()) } else { None },
+                    ended_at: None,
+                    attempts: None,
+                    gate: None,
+                    failures: Vec::new(),
+                    usage: None,
+                })
+                .collect(),
+        }
+    }
+
     pub fn stage(&self, id: StageId) -> Option<&StageState> {
         self.stages.iter().find(|s| s.id == id)
     }
@@ -237,6 +270,19 @@ mod tests {
         assert!(h.starts_with("sha256:") && h.len() == 71);
         assert_eq!(h, input_hash(&[b"a", b"b"]));
         assert_ne!(h, input_hash(&[b"ab"]));
+    }
+
+    #[test]
+    fn new_state_is_contract_valid() {
+        let state = PipelineState::new(
+            "ws-demo",
+            "run-20261001-0001",
+            Some("insurance/auto-claim@0.1.0"),
+        );
+        validate_against_contract(&serde_json::to_value(&state).unwrap()).unwrap();
+        assert_eq!(state.stage(StageId::S1).unwrap().status, StageStatus::Running);
+        assert_eq!(state.stage(StageId::S8).unwrap().status, StageStatus::Pending);
+        assert!(!state.gate_is_current(StageId::S4));
     }
 
     #[test]

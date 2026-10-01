@@ -44,8 +44,12 @@ pub struct Workspace {
 
 impl Workspace {
     pub fn create(id: &str) -> Result<Self> {
+        Self::create_at(&base_dir()?, id)
+    }
+
+    pub fn create_at(base: &Path, id: &str) -> Result<Self> {
         check_id(id)?;
-        let root = base_dir()?.join(id);
+        let root = base.join(id);
         if root.exists() {
             bail!("workspace 已存在: {}", root.display());
         }
@@ -72,8 +76,12 @@ impl Workspace {
     }
 
     pub fn open(id: &str) -> Result<Self> {
+        Self::open_at(&base_dir()?, id)
+    }
+
+    pub fn open_at(base: &Path, id: &str) -> Result<Self> {
         check_id(id)?;
-        let root = base_dir()?.join(id);
+        let root = base.join(id);
         if !root.join("icewright.toml").exists() {
             bail!("workspace 不存在或未初始化: {}", root.display());
         }

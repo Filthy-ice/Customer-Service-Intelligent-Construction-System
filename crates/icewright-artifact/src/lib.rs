@@ -48,6 +48,9 @@ pub const CONTRACT_DIRS: &[(&str, &str, &str)] = &[
 pub const PIPELINE_STATE_SCHEMA: &str =
     include_str!("../contracts/pipeline-state.schema.json");
 
+/// Const `schema_version` shared by all contracts.
+pub const SCHEMA_VERSION: &str = "0.1.0";
+
 pub struct Compiled {
     name: &'static str,
     validator: Validator,
