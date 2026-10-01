@@ -142,6 +142,27 @@ pub fn generate(ws: &Workspace, out_dir: &Path) -> Result<GenerateReport> {
         bail!("rules.json 违反契约，拒绝生成：{errors:?}");
     }
 
+    // 契约硬闸：接口存在性须由客户技术侧逐条确认后才可进 S5（模型一律输出 false）
+    let apis_path = ws.artifact_path(crate::extract::APIS_ARTIFACT);
+    if apis_path.exists() {
+        let apis: Value = serde_json::from_str(&std::fs::read_to_string(&apis_path)?)?;
+        let unconfirmed: Vec<&str> = apis["apis"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter(|x| x["confirmed_by_customer"].as_bool() != Some(true))
+                    .filter_map(|x| x["id"].as_str())
+                    .collect()
+            })
+            .unwrap_or_default();
+        if !unconfirmed.is_empty() {
+            bail!(
+                "以下接口未获客户确认存在（须人工把 apis.json 的 confirmed_by_customer 改为 true 并重新过闸门A）：{}",
+                unconfirmed.join(", ")
+            );
+        }
+    }
+
     let cfg = ws.config()?;
     let cfg_pack = if cfg.workspace.pack.is_empty() {
         None
@@ -337,5 +358,21 @@ mod tests {
         state::save_state(&p, &st).unwrap();
         let err = generate(&ws, &ws.root.join("output")).unwrap_err();
         assert!(err.to_string().contains("闸门A未生效"), "{err}");
+    }
+
+    #[test]
+    fn unconfirmed_api_blocks_generation() {
+        let ws = setup("apiconfirm");
+        let apis = icewright_artifact::example("api-contract").unwrap();
+        let path = ws.artifact_path(crate::extract::APIS_ARTIFACT);
+        std::fs::write(&path, serde_json::to_string_pretty(&apis).unwrap()).unwrap();
+        let err = generate(&ws, &ws.root.join("output")).unwrap_err();
+        assert!(err.to_string().contains("API-claim-progress"), "{err}");
+
+        // 人工把存在性确认改为 true 后放行
+        let mut v = apis;
+        v["apis"][0]["confirmed_by_customer"] = serde_json::json!(true);
+        std::fs::write(&path, serde_json::to_string_pretty(&v).unwrap()).unwrap();
+        assert!(generate(&ws, &ws.root.join("output")).is_ok());
     }
 }

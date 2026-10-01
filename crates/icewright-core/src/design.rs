@@ -73,15 +73,22 @@ pub fn render_design(ws: &Workspace) -> Result<String> {
     }
 
     out.push_str("\n## 4. 数据字段（条件引用）\n\n");
-    if let Some(dict) = load_json(ws, "dictionary.json")? {
+    if let Some(dict) = load_json(ws, crate::extract::DICTIONARY_ARTIFACT)? {
         for f in dict["fields"].as_array().unwrap_or(&Vec::new()) {
+            let pii = f["pii"].as_str().unwrap_or("none");
+            let pii_tag = if pii == "none" {
+                String::new()
+            } else {
+                format!("，pii={pii}")
+            };
             out.push_str(&format!(
-                "- {}（来源 {}）\n",
-                f["id"].as_str().unwrap_or("?"),
+                "- {}（来源 {}{}）\n",
+                f["field"].as_str().unwrap_or("?"),
                 f["source"]["kind"]
                     .as_str()
                     .or(f["source"].as_str())
-                    .unwrap_or("?")
+                    .unwrap_or("?"),
+                pii_tag
             ));
         }
     } else {
@@ -102,21 +109,95 @@ pub fn render_design(ws: &Workspace) -> Result<String> {
         ));
     }
 
-    out.push_str("\n## 5. 外部接口（运行时实时调用，本系统不落库）\n\n");
-    if let Some(apis) = load_json(ws, "apis.json")? {
-        for a in apis["apis"].as_array().unwrap_or(&Vec::new()) {
+    out.push_str("\n## 5. 对话流程（harness 内由模型自主驱动，非硬编码工作流）\n\n");
+    if let Some(flows) = load_json(ws, crate::extract::FLOWS_ARTIFACT)? {
+        for flow in flows["flows"].as_array().unwrap_or(&Vec::new()) {
+            let slots = flow["slots"].as_array().map(|a| a.len()).unwrap_or(0);
             out.push_str(&format!(
-                "- {} {} — {}\n",
+                "- **{}** {}（槽位 {slots} 个）\n",
+                flow["flow"].as_str().unwrap_or("?"),
+                flow["description"].as_str().unwrap_or("")
+            ));
+            let states = flow["states"].as_array().cloned().unwrap_or_default();
+            for s in &states {
+                let sid = s["id"].as_str().unwrap_or("?");
+                let ty = s["type"].as_str().unwrap_or("normal");
+                let trs: Vec<String> = s["transitions"]
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .map(|t| {
+                                let rr = t["rule_ref"]
+                                    .as_str()
+                                    .map(|r| format!(" ⇐{r}"))
+                                    .unwrap_or_default();
+                                format!(
+                                    "{}→{}{rr}",
+                                    t["on"].as_str().unwrap_or("?"),
+                                    t["to"].as_str().unwrap_or("?")
+                                )
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let acts: Vec<String> = s["actions"]
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .map(|x| {
+                                format!(
+                                    "{}:{}",
+                                    x["kind"].as_str().unwrap_or("?"),
+                                    x["ref"].as_str().unwrap_or("")
+                                )
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                out.push_str(&format!(
+                    "  - {sid} [{ty}]{}\n",
+                    if trs.is_empty() && acts.is_empty() {
+                        String::new()
+                    } else {
+                        format!("；动作 {}；转移 {}", acts.join("、"), trs.join(" | "))
+                    }
+                ));
+            }
+        }
+    } else {
+        out.push_str("- （尚未提供 flows.json；无流程则运行时仅按规则驱动）\n");
+    }
+
+    out.push_str("\n## 6. 外部接口（运行时实时调用，本系统不落库）\n\n");
+    if let Some(apis) = load_json(ws, crate::extract::APIS_ARTIFACT)? {
+        let list = apis["apis"].as_array().cloned().unwrap_or_default();
+        let mut unconfirmed = 0usize;
+        for a in &list {
+            if a["confirmed_by_customer"].as_bool() != Some(true) {
+                unconfirmed += 1;
+            }
+            out.push_str(&format!(
+                "- {} {}{} — {}\n",
                 a["method"].as_str().unwrap_or("?"),
-                a["path"].as_str().unwrap_or("?"),
-                a["description"].as_str().unwrap_or("")
+                a["endpoint"].as_str().unwrap_or("?"),
+                if a["confirmed_by_customer"].as_bool() == Some(true) {
+                    ""
+                } else {
+                    " ⚠未确认"
+                },
+                a["purpose"].as_str().unwrap_or("")
+            ));
+        }
+        if unconfirmed > 0 {
+            out.push_str(&format!(
+                "\n> ⚠ {unconfirmed} 个接口尚未确认（confirmed_by_customer=false）；闸门A 批准前须逐个与对方技术部门核实真实存在，否则 S5 生成将被拒绝。\n"
             ));
         }
     } else {
         out.push_str("- （尚未提供 apis.json，请在闸门A 前确认对方核心系统接口）\n");
     }
 
-    out.push_str("\n## 6. 闸门A 确认须知\n\n");
+    out.push_str("\n## 7. 闸门A 确认须知\n\n");
     out.push_str("- 本文件由引擎确定性渲染；任何产物变更后须重新 `design render` 并再次确认。\n");
     out.push_str("- 确认后进入 S5 代码生成；驳回请附注原因。\n");
     Ok(out)
@@ -313,6 +394,29 @@ mod tests {
         assert!(md.contains("R-AUTO-0001"));
         assert!(md.contains("keyring://"));
         assert!(!md.contains("sk-"));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn design_covers_flows_dictionary_and_api_confirmation() {
+        let (ws, base) = ws_with_rules("full");
+        for (contract, file) in [
+            ("api-contract", crate::extract::APIS_ARTIFACT),
+            ("flows", crate::extract::FLOWS_ARTIFACT),
+            ("data-dictionary", crate::extract::DICTIONARY_ARTIFACT),
+        ] {
+            let v = icewright_artifact::example(contract).unwrap();
+            std::fs::write(
+                ws.artifact_path(file),
+                serde_json::to_string_pretty(&v).unwrap(),
+            )
+            .unwrap();
+        }
+        let md = render_design(&ws).unwrap();
+        assert!(md.contains("F-report"), "应有流程章节");
+        assert!(md.contains("slots_complete(F-report)"));
+        assert!(md.contains("FLD-claim_status"), "字典字段应正确渲染");
+        assert!(md.contains("⚠未确认"), "样例接口默认未确认应标红");
         let _ = std::fs::remove_dir_all(&base);
     }
 }

@@ -9,6 +9,11 @@
       "description": "报案/请求提交时间"
     },
     {
+      "field": "FLD-claim_status",
+      "type": "string",
+      "source": { "kind": "api", "ref": "API-claim-progress" }
+    },
+    {
       "field": "FLD-claim_documents_complete",
       "type": "bool",
       "source": { "kind": "api", "ref": "API-claim-progress" }

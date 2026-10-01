@@ -92,8 +92,13 @@ enum PipelineAction {
     Init { ws: String },
     /// S2 环境预检（语料/模型端点/密钥/stack/行业包），结论写回状态
     Preflight { ws: String },
-    /// S3 领域规则提取（契约校验 + 修复回环），产物 artifacts/rules.json
-    Extract { ws: String },
+    /// S3 领域产物提取（契约校验 + 修复回环 + 跨产物引用检查）
+    Extract {
+        ws: String,
+        /// 仅提取指定类型（apis/flows/dictionary/rules）；缺省按依赖顺序提取全部四类
+        #[arg(long)]
+        kinds: Vec<String>,
+    },
     /// 打印某 workspace 的 pipeline 状态表
     Status { ws: String },
 }
@@ -298,7 +303,8 @@ fn cmd_pipeline_preflight(ws_id: &str) -> Result<()> {
     }
 }
 
-fn cmd_pipeline_extract(ws_id: &str) -> Result<()> {
+fn cmd_pipeline_extract(ws_id: &str, kinds: &[String]) -> Result<()> {
+    use icewright_core::extract::Kind;
     let ws = Workspace::open(ws_id)?;
     if !ws.state_path().exists() {
         anyhow::bail!("请先 `icewright pipeline init {ws_id}`");
@@ -307,9 +313,26 @@ fn cmd_pipeline_extract(ws_id: &str) -> Result<()> {
     if st_before.stage(state::StageId::S2).unwrap().status != state::StageStatus::Approved {
         anyhow::bail!("S2 预检未通过，禁止进入 S3：先运行 `icewright pipeline preflight {ws_id}`");
     }
+    let selected: Vec<Kind> = if kinds.is_empty() {
+        Kind::ORDER.to_vec()
+    } else {
+        kinds
+            .iter()
+            .map(|s| {
+                Kind::parse_slug(s).ok_or_else(|| {
+                    anyhow::anyhow!("未知产物类型 {s}（可选 apis/flows/dictionary/rules）")
+                })
+            })
+            .collect::<Result<_>>()?
+    };
+    // 按依赖顺序执行，无视用户给出的顺序
+    let selected = Kind::ORDER
+        .into_iter()
+        .filter(|k| selected.contains(k))
+        .collect::<Vec<_>>();
     let cfg = ws.require_configured()?;
     let key = secrets::resolve(&secrets::SecretRef::parse(&cfg.model.key_ref)?)?;
-    let st = icewright_core::extract::run(&ws, |msgs| {
+    let st = icewright_core::extract::run(&ws, &selected, |msgs| {
         icewright_core::model::chat(
             &cfg.model,
             &key,
@@ -319,14 +342,21 @@ fn cmd_pipeline_extract(ws_id: &str) -> Result<()> {
         )
         .map(|o| o.content)
     })?;
-    let rules: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(
-        ws.artifact_path(icewright_core::extract::RULES_ARTIFACT),
-    )?)?;
-    let n = rules["rules"].as_array().map(|a| a.len()).unwrap_or(0);
+    for k in &selected {
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(ws.artifact_path(k.file()))?)?;
+        let arr = match k {
+            Kind::Apis => "apis",
+            Kind::Flows => "flows",
+            Kind::Dictionary => "fields",
+            Kind::Rules => "rules",
+        };
+        let n = v[arr].as_array().map(|a| a.len()).unwrap_or(0);
+        println!("  {} → {} 项（{}）", k.slug(), n, k.file());
+    }
     println!(
-        "S3 完成：提取 {n} 条规则 → {}；当前阶段 {:?}",
-        ws.artifact_path(icewright_core::extract::RULES_ARTIFACT)
-            .display(),
+        "S3 完成（{} 类产物已交叉校验）；当前阶段 {:?}",
+        selected.len(),
         st.current_stage
     );
     println!("下一步：`icewright design render {ws_id}` 生成设计文档供闸门A确认");
@@ -617,7 +647,7 @@ fn main() -> Result<()> {
         Cmd::Pipeline { action } => match action {
             PipelineAction::Init { ws } => cmd_pipeline_init(ws),
             PipelineAction::Preflight { ws } => cmd_pipeline_preflight(ws),
-            PipelineAction::Extract { ws } => cmd_pipeline_extract(ws),
+            PipelineAction::Extract { ws, kinds } => cmd_pipeline_extract(ws, kinds),
             PipelineAction::Status { ws } => cmd_pipeline_status(ws),
         },
         Cmd::Config { action } => match action {
