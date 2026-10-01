@@ -16,6 +16,16 @@ key_ref = ""       # 仅 keyring 引用（keyring://...），禁止内联密钥
 [model.routing]
 # extract = "strong-model"   # S3 规则提取
 # script  = "cheap-model"    # 运行期话术
+
+# 可选数据源：填了 host 才纳入 S2 预检（Redis 存会话槽位，MySQL 为对方核心系统示例）
+#[datasource.redis]
+#host = ""
+#port = 6379
+#key_ref = ""                 # 仅 keyring 引用（keyring://...），禁内联密码
+#[datasource.mysql]
+#host = ""
+#port = 3306
+#user = "root"
 "#;
 
 fn check_id(id: &str) -> Result<()> {

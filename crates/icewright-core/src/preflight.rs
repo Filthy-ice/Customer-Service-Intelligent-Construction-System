@@ -142,7 +142,74 @@ pub fn run(ws: &Workspace, secrets_root: &Path) -> Result<Vec<Check>> {
         },
     ));
 
+    checks.extend(datasource_checks(&cfg, secrets_root, timeout));
+
     Ok(checks)
+}
+
+/// Redis/MySQL 协议级探测；未配置 host 则非阻塞跳过。
+fn datasource_checks(
+    cfg: &crate::config::Config,
+    secrets_root: &Path,
+    timeout: std::time::Duration,
+) -> Vec<Check> {
+    let mut out = Vec::new();
+
+    let redis = &cfg.datasource.redis;
+    if redis.host.trim().is_empty() {
+        out.push(Check::new(
+            "datasource_redis",
+            true,
+            "未配置（跳过）".into(),
+        ));
+    } else {
+        let pass = if redis.key_ref.trim().is_empty() {
+            None
+        } else {
+            match SecretRef::parse(redis.key_ref.trim())
+                .and_then(|r| secrets::resolve_at(secrets_root, &r))
+            {
+                Ok(p) => Some(p),
+                Err(e) => {
+                    out.push(Check::new(
+                        "datasource_redis",
+                        false,
+                        format!("密码引用无法解析: {e:#}"),
+                    ));
+                    return out;
+                }
+            }
+        };
+        out.push(
+            match crate::datasource::redis_probe(
+                redis.host.trim(),
+                redis.port,
+                pass.as_deref(),
+                timeout,
+            ) {
+                Ok(d) => Check::new("datasource_redis", true, d),
+                Err(e) => Check::new("datasource_redis", false, e),
+            },
+        );
+    }
+
+    let mysql = &cfg.datasource.mysql;
+    if mysql.host.trim().is_empty() {
+        out.push(Check::new(
+            "datasource_mysql",
+            true,
+            "未配置（跳过）".into(),
+        ));
+    } else {
+        out.push(
+            match crate::datasource::mysql_probe(mysql.host.trim(), mysql.port, timeout) {
+                Ok(d) => Check::new("datasource_mysql", true, d),
+                Err(e) => Check::new("datasource_mysql", false, e),
+            },
+        );
+    }
+
+    out
 }
 
 /// 跑预检并把结论写回 pipeline 状态（S1/S2 状态与失败明细）。返回检查清单。

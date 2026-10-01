@@ -7,6 +7,7 @@ use std::path::Path;
 pub struct Config {
     pub workspace: WorkspaceCfg,
     pub model: ModelCfg,
+    pub datasource: DatasourceCfg,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -31,6 +32,42 @@ pub struct ModelCfg {
 pub struct RoutingCfg {
     pub extract: Option<String>,
     pub script: Option<String>,
+}
+
+/// 可选数据源：仅在配置了 host 时进入 S2 预检探测。
+/// 运行时会话槽位存 Redis；MySQL 作为"对方核心系统"示例库（本系统不落业务数据）。
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DatasourceCfg {
+    pub redis: RedisCfg,
+    pub mysql: MysqlCfg,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RedisCfg {
+    pub host: String,
+    pub port: u16,
+    /// 密码仅以 keyring 引用存储（keyring://...），禁止内联
+    pub key_ref: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct MysqlCfg {
+    pub host: String,
+    pub port: u16,
+    pub user: String,
+}
+
+impl Default for MysqlCfg {
+    fn default() -> Self {
+        Self {
+            host: String::new(),
+            port: 3306,
+            user: "root".to_string(),
+        }
+    }
 }
 
 pub fn load(path: &Path) -> Result<Config> {
