@@ -102,8 +102,7 @@ icewright model discover deepseek        # 实时拉取 GET {base}/models，列�
 icewright model use my-claim deepseek --model <在线名称>   # 写入配置
 ```
 
-- 目录中的 `base_url` 只是官方文档当前值；`discover`/`probe` 每次都实连端点，以线上实况为准。
-- **自部署/私有网关/接入点变更**：编辑 `~/.icewright/providers.json`（JSON）同名覆盖或新增条目：
+- 目录中的 `base_url` 只是官方文档当前值；`discover`/`probe` 每次都实连端点，以线上实况为准。- **自部署/私有网关/接入点变更**：编辑 `~/.icewright/providers.json`（JSON）同名覆盖或新增条目：
 
 ```json
 {
@@ -121,6 +120,11 @@ icewright model use my-claim deepseek --model <在线名称>   # 写入配置
 ```
 
 - 完全没有目录项的端点也可直连：`icewright model discover --url http://10.0.0.9:8000/v1 --key-env MY_KEY`。
+
+## 贡献
+
+新增或修订行业包（规则基线、词典、流程模板、评测套件）请先读 [CONTRIBUTING.md](CONTRIBUTING.md)——
+包与引擎只通过 JSON Schema 契约交流，提交前需过双通道契约自检与 CI 四项门禁。
 
 ## 许可证
 
