@@ -124,6 +124,8 @@ enum ConfigAction {
 enum SecretAction {
     /// 从 stdin 读密钥并存储到 keyring 引用对应位置（软件代存）
     Set { r#ref: String },
+    /// 删除 keyring:// 引用的软件代存副本（原生后端与文件回退两处）
+    Remove { r#ref: String },
     /// 软件代配环境变量：stdin 读密钥，写入 ~/.icewright/env/icewright.env 的 export 行（0600）；
     /// --shell-profile 指定启动文件（如 ~/.bashrc）则同时追加并备份
     SetEnv {
@@ -333,8 +335,30 @@ fn cmd_config_set(ws_id: &str, key: &str, value: &str) -> Result<()> {
 fn cmd_secret_set(r#ref: &str) -> Result<()> {
     let r = secrets::SecretRef::parse(r#ref)?;
     let secret = secrets::read_secret_from_stdin()?;
-    secrets::store(&r, &secret)?;
-    println!("{}", tf("secret_stored", &[("uri", &r.to_uri())]));
+    let backend = secrets::store(&r, &secret)?;
+    match backend {
+        secrets::StoreBackend::Native => {
+            println!("{}", tf("secret_stored_native", &[("uri", &r.to_uri())]))
+        }
+        secrets::StoreBackend::FileFallback { reason } => println!(
+            "{}",
+            tf(
+                "secret_stored_fallback",
+                &[("uri", &r.to_uri()), ("reason", &reason)]
+            )
+        ),
+    }
+    Ok(())
+}
+
+fn cmd_secret_remove(r#ref: &str) -> Result<()> {
+    let r = secrets::SecretRef::parse(r#ref)?;
+    let (native, file) = secrets::remove(&r)?;
+    if native || file {
+        println!("{}", tf("secret_removed", &[("uri", &r.to_uri())]));
+    } else {
+        println!("{}", tf("secret_absent", &[("uri", &r.to_uri())]));
+    }
     Ok(())
 }
 
@@ -1186,6 +1210,7 @@ fn main() -> Result<()> {
         },
         Cmd::Secret { action } => match action {
             SecretAction::Set { r#ref } => cmd_secret_set(r#ref),
+            SecretAction::Remove { r#ref } => cmd_secret_remove(r#ref),
             SecretAction::SetEnv { var, shell_profile } => {
                 cmd_secret_set_env(var, shell_profile.as_deref())
             }

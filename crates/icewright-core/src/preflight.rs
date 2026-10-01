@@ -108,7 +108,7 @@ pub fn run(ws: &Workspace, secrets_root: &Path) -> Result<Vec<Check>> {
 
     let key_check = match SecretRef::parse(cfg.model.key_ref.trim()) {
         Err(e) => Check::new("model_key", false, format!("{e:#}")),
-        Ok(r) => match secrets::resolve_at(secrets_root, &r) {
+        Ok(r) => match secrets::resolve_in(secrets_root, &r) {
             Ok(_) => Check::new("model_key", true, format!("{} 可解析", r.to_uri())),
             Err(_) => Check::new(
                 "model_key",
@@ -205,7 +205,7 @@ fn datasource_checks(
             None
         } else {
             match SecretRef::parse(redis.key_ref.trim())
-                .and_then(|r| secrets::resolve_at(secrets_root, &r))
+                .and_then(|r| secrets::resolve_in(secrets_root, &r))
             {
                 Ok(p) => Some(p),
                 Err(e) => {
