@@ -1,6 +1,7 @@
 //! CLI 文案 i18n：key → zh/en 目录，`{placeholder}` 具名替换。
 //! 语言选择：环境变量 ICERIGHT_LOCALE（临时）> workspace.locale（icewright.toml，默认 zh）。
-//! 注：本目录只覆盖 CLI 自身输出；引擎错误（core bail!）与 clap 帮助文案的 i18n 属桌面客户端阶段。
+//! 注：本目录覆盖 CLI 自身输出与 clap 帮助文案（locale=en 时由 SUB_HELP/ARG_HELP 覆写，
+//! 单测双向对账防漂移）；引擎内部报错（core bail!）的 i18n 属桌面客户端阶段。
 use std::sync::atomic::{AtomicBool, Ordering};
 
 static IS_EN: AtomicBool = AtomicBool::new(false);
@@ -124,6 +125,152 @@ pub fn tf(key: &str, args: &[(&str, &str)]) -> String {
         out = out.replace(&format!("{{{name}}}"), val);
     }
     out
+}
+
+/// 英文帮助覆写表：命令路径（空格分隔，根为 ""）→ about 文案。
+/// derive 里的中文 doc 是基准；本表只在 locale=en 时盖上去。
+/// 与命令树双向对账（apply_en_help），漏译会进 CI 测试失败。
+const SUB_HELP: &[(&str, &str)] = &[
+    ("", "IceWright — intelligent builder for industry customer-service systems (CLI)"),
+    ("ws", "workspace management (per-project isolation units)"),
+    ("ws new", "create a workspace (corpus/artifacts/pipeline/output/eval-runs/logs layout)"),
+    ("ws list", "list all workspaces"),
+    ("pipeline", "initialize or inspect the pipeline"),
+    ("pipeline init", "initialize the pipeline (writes pipeline/state.json; refuses if it exists)"),
+    ("pipeline preflight", "S2 environment preflight (corpus/model endpoint/keys/stack/industry pack); results saved to state"),
+    ("pipeline extract", "S3 domain artifact extraction (contract validation + repair loop + cross-artifact reference checks)"),
+    ("pipeline status", "print the pipeline status table of a workspace"),
+    ("build", "one-shot pipeline: auto-initialize S1, advance to the next human gate (Gate A/B) and pause; rerun after approval to resume"),
+    ("config", "read/write workspace config (dot keys such as model.base_url, model.key_ref)"),
+    ("config show", "print the effective config (raw icewright.toml)"),
+    ("config set", "set a dot key, e.g. `config set <ws> model.base_url https://...`"),
+    ("secret", "local secret storage (keyring:// references)"),
+    ("secret set", "read a secret from stdin and store it under the keyring reference (managed by the tool)"),
+    ("secret remove", "delete stored copies of a keyring:// reference (native backend and file fallback)"),
+    ("secret set-env", "manage an env var for you: stdin secret written as an export line into ~/.icewright/env/icewright.env (0600); --shell-profile <file> also appends to and backs up that file"),
+    ("design", "S4 design document render and Gate A approval"),
+    ("design render", "render the design doc and enter waiting_gate (artifact changes void prior approvals)"),
+    ("design show", "print the design document"),
+    ("design approve", "Gate A: approve (bound to the current artifact hash)"),
+    ("design reject", "Gate A: reject (note required)"),
+    ("generate", "S5 code generation (requires a current Gate A for this design)"),
+    ("verify", "S6 automated verification: compile and run unit tests of the generated project; results saved to state"),
+    ("delivery", "S7 delivery report render and Gate B acceptance"),
+    ("delivery render", "render the delivery report and enter waiting_gate (artifact changes void prior approvals)"),
+    ("delivery show", "print the delivery report"),
+    ("delivery approve", "Gate B: approve delivery (bound to the current report hash)"),
+    ("delivery reject", "Gate B: reject (note required)"),
+    ("evaluate", "evaluation replay: run artifacts/evals/eval.json cases against a live generated system"),
+    ("model", "model access probe (minimal completion request validating endpoint/key/model triple)"),
+    ("model probe", "send a probe message to the model and report latency and usage"),
+    ("model providers", "list built-in plus locally overridden provider catalog (endpoints/docs/default model)"),
+    ("model discover", "fetch the provider /models endpoint live and list current model names (nothing hardcoded)"),
+    ("model use", "one-shot workspace configuration: writes provider endpoint and model; the key defaults to an env reference"),
+    ("contract", "M0 contract self-check: validate all schemas against built-in instances"),
+    ("contract check", "validate bundled contracts and samples (nonzero exit = contract broken)"),
+];
+
+/// 英文参数帮助：(命令路径, 参数 id, 文案)。id 取字段名（positional 与长选项同名）。
+const ARG_HELP: &[(&str, &str, &str)] = &[
+    (
+        "pipeline extract",
+        "kinds",
+        "extract only these artifact kinds (apis/flows/dictionary/rules/skills); default extracts all five in dependency order",
+    ),
+    ("generate", "out", "output directory; defaults to the workspace's output/"),
+    (
+        "verify",
+        "python",
+        "interpreter for the target stack (defaults to $IW_PYTHON or python3)",
+    ),
+    (
+        "evaluate",
+        "url",
+        "base URL of the running generated system, e.g. http://127.0.0.1:8000",
+    ),
+    (
+        "model discover",
+        "provider",
+        "provider name (see `model providers`), or pair --url with any OpenAI-compatible endpoint",
+    ),
+    (
+        "model discover",
+        "key_env",
+        "env var name holding the key; defaults to the provider's first set candidate",
+    ),
+    (
+        "model use",
+        "model",
+        "model name; defaults to the catalog value (run `model discover` for live names)",
+    ),
+];
+
+fn sub_help_for(path: &str) -> Option<&'static str> {
+    SUB_HELP.iter().find(|(p, _)| *p == path).map(|(_, s)| *s)
+}
+
+fn find_command<'a>(cmd: &'a clap::Command, path: &str) -> Option<&'a clap::Command> {
+    if path.is_empty() {
+        return Some(cmd);
+    }
+    let (head, rest) = path.split_once(' ').unwrap_or((path, ""));
+    find_command(cmd.find_subcommand(head)?, rest)
+}
+
+/// locale=en 时把英文表盖到 clap 命令树上；返回双向对账问题清单
+/// （树上有表上没有 = no-en-help；表上有树上没有 = stale-*）。
+pub fn apply_en_help(cmd: &mut clap::Command) -> Vec<String> {
+    let mut problems = Vec::new();
+    walk_en(cmd, "", &mut problems);
+    for (p, _) in SUB_HELP {
+        if find_command(cmd, p).is_none() {
+            problems.push(format!("stale-path: {p:?}"));
+        }
+    }
+    for (p, id, _) in ARG_HELP {
+        let held =
+            find_command(cmd, p).is_some_and(|c| c.get_arguments().any(|a| a.get_id() == *id));
+        if !held {
+            problems.push(format!("stale-arg: {p:?}/{id}"));
+        }
+    }
+    problems
+}
+
+/// clap 4.6 的构建方法全部按值消费 Command；在 &mut 原位改写需先取出再放回。
+fn rewrite(cmd: &mut clap::Command, f: impl FnOnce(clap::Command) -> clap::Command) {
+    let owned = std::mem::replace(cmd, clap::Command::new(""));
+    *cmd = f(owned);
+}
+
+fn walk_en(cmd: &mut clap::Command, path: &str, problems: &mut Vec<String>) {
+    match sub_help_for(path) {
+        Some(text) => rewrite(cmd, |c| c.about(Some(text)).long_about(Some(text))),
+        None => problems.push(format!("no-en-help: {path:?}")),
+    }
+    for (p, id, text) in ARG_HELP {
+        if *p == path {
+            rewrite(cmd, move |c| {
+                c.mut_arg(id, move |arg| arg.help(Some(*text)))
+            });
+        }
+    }
+    let subs = cmd
+        .get_subcommands()
+        .map(|s| s.get_name().to_string())
+        .collect::<Vec<_>>();
+    for name in subs {
+        let child = cmd
+            .get_subcommands_mut()
+            .find(|s| s.get_name() == name)
+            .expect("刚收集到的子命令必然存在");
+        let child_path = if path.is_empty() {
+            name
+        } else {
+            format!("{path} {name}")
+        };
+        walk_en(child, &child_path, problems);
+    }
 }
 
 #[cfg(test)]

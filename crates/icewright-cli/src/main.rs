@@ -1189,9 +1189,20 @@ fn cmd_contract_check() -> Result<()> {
     Ok(())
 }
 
+fn parse_cli() -> Cli {
+    use clap::CommandFactory;
+    let mut cmd = Cli::command();
+    if i18n::is_en() {
+        // 帮助语言只做尽力覆盖：对账问题在单测里拦，运行时不阻断命令
+        let _ = i18n::apply_en_help(&mut cmd);
+    }
+    let matches = cmd.get_matches();
+    clap::FromArgMatches::from_arg_matches(&matches).unwrap_or_else(|e| e.exit())
+}
+
 fn main() -> Result<()> {
     i18n::init_from_env();
-    let cli = Cli::parse();
+    let cli = parse_cli();
     match &cli.command {
         Cmd::Ws { action } => match action {
             WsAction::New { id } => cmd_ws_new(id),
@@ -1237,5 +1248,21 @@ fn main() -> Result<()> {
         Cmd::Contract { action } => match action {
             ContractAction::Check => cmd_contract_check(),
         },
+    }
+}
+
+#[cfg(test)]
+mod help_i18n_tests {
+    use clap::CommandFactory;
+
+    /// SUB_HELP/ARG_HELP 与 derive 命令树双向对账：漏译或表里留旧路径都会失败。
+    #[test]
+    fn english_help_tables_match_command_tree() {
+        let mut cmd = crate::Cli::command();
+        let problems = crate::i18n::apply_en_help(&mut cmd);
+        assert!(
+            problems.is_empty(),
+            "clap 英文帮助对账失败（补表或删旧项）：{problems:#?}"
+        );
     }
 }

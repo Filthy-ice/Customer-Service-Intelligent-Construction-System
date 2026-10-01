@@ -72,7 +72,7 @@ key_ref = "env://DEEPSEEK_API_KEY"     # 见下"模型接入与密钥"
 
 ### 界面语言（zh / en）
 
-构建器 CLI 输出文案支持中英切换，优先级：环境变量 `ICERIGHT_LOCALE`（临时覆盖）> `workspace.locale`（持久，默认 zh）；`icewright config set <ws> workspace.locale en` 即时生效（该条输出即用新语言）。生成出来的客服系统前端语言不在此列——它自带聊天页面（`GET /`），访客在页面右上角选择 zh/en，固定话术与模型回复都跟随所选语言，未知语言回退 zh。clap 帮助文案与引擎内部报错目前仍为中文，随桌面客户端阶段一并 i18n。
+构建器 CLI 输出文案支持中英切换，优先级：环境变量 `ICERIGHT_LOCALE`（临时覆盖）> `workspace.locale`（持久，默认 zh）；`icewright config set <ws> workspace.locale en` 即时生效（该条输出即用新语言）。clap 帮助文案同样双语——`--help` 在参数解析前打印，故帮助语言只看 `ICERIGHT_LOCALE=en`；英文表与命令树由单测双向对账，漏译即 CI 失败。生成出来的客服系统前端语言不在此列——它自带聊天页面（`GET /`），访客在页面右上角选择 zh/en，固定话术与模型回复都跟随所选语言，未知语言回退 zh。引擎内部报错目前仍为中文，随桌面客户端阶段一并 i18n。
 
 ### 模型接入与密钥（BYOK）
 
