@@ -981,6 +981,7 @@ fn print_gen_report(report: &icewright_core::generate::GenerateReport) {
                 ("m", &report.diff.modified.len().to_string()),
                 ("u", &report.diff.unchanged.len().to_string()),
                 ("r", &report.diff.removed.len().to_string()),
+                ("k", &report.diff.conflicts.len().to_string()),
             ]
         )
     );
@@ -993,8 +994,14 @@ fn print_gen_report(report: &icewright_core::generate::GenerateReport) {
     for f in &report.diff.removed {
         println!("{}", tf("gen_removed", &[("f", f)]));
     }
+    for f in &report.diff.conflicts {
+        println!("{}", tf("gen_conflict", &[("f", f)]));
+    }
     for f in &report.preserved {
         println!("{}", tf("gen_preserved", &[("f", f)]));
+    }
+    if !report.diff.conflicts.is_empty() {
+        println!("{}", t("gen_conflict_next"));
     }
 }
 

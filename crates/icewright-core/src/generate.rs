@@ -313,6 +313,8 @@ pub struct FileDiff {
     pub unchanged: Vec<String>,
     /// 上一轮由引擎写出、本轮模板集不再包含的文件（只报告不删除）
     pub removed: Vec<String>,
+    /// 托管文件被本地手工改过且与本轮引擎内容不一致：保留本地版本，不写入
+    pub conflicts: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -325,12 +327,18 @@ pub struct GenerateReport {
 }
 
 /// 引擎自记的文件清单（S8 增量对比基准），与生成工程解耦，不参与 output_hash。
+/// rel → 引擎上一轮写入内容的哈希；null/缺失表示旧版清单或定制保留，不参与冲突判定。
 const MANIFEST_FILE: &str = "ICEWRIGHT-MANIFEST.json";
 
-fn load_manifest(out_dir: &Path) -> Vec<String> {
-    std::fs::read_to_string(out_dir.join(MANIFEST_FILE))
-        .ok()
-        .and_then(|raw| serde_json::from_str::<Vec<String>>(&raw).ok())
+fn load_manifest(out_dir: &Path) -> std::collections::BTreeMap<String, Option<String>> {
+    let raw = match std::fs::read_to_string(out_dir.join(MANIFEST_FILE)) {
+        Ok(r) => r,
+        Err(_) => return Default::default(),
+    };
+    if let Ok(list) = serde_json::from_str::<Vec<String>>(&raw) {
+        return list.into_iter().map(|f| (f, None)).collect();
+    }
+    serde_json::from_str::<std::collections::BTreeMap<String, Option<String>>>(&raw)
         .unwrap_or_default()
 }
 
@@ -438,18 +446,40 @@ pub fn generate(ws: &Workspace, out_dir: &Path) -> Result<GenerateReport> {
     };
 
     /// 一轮生成的累积结果：分类 diff、哈希材料、引擎管理文件清单。
-    struct Outcome {
+    struct Outcome<'a> {
         written: Vec<String>,
         preserved: Vec<String>,
         diff: FileDiff,
         managed: Vec<String>,
         hashed: Vec<String>,
+        prev: &'a std::collections::BTreeMap<String, Option<String>>,
+        /// rel → 引擎本轮认定的内容哈希（冲突文件沿用上一轮哈希；定制文件记 null）
+        hashes: std::collections::BTreeMap<String, Option<String>>,
     }
-    impl Outcome {
+    impl Outcome<'_> {
         fn place(&mut self, out_dir: &Path, rel: String, content: String) -> Result<()> {
             let target = out_dir.join(&rel);
-            match std::fs::read_to_string(&target).ok() {
-                Some(old) if old == content => self.diff.unchanged.push(rel.clone()),
+            let old = std::fs::read_to_string(&target).ok();
+            // 仅当清单记有引擎哈希且磁盘内容不符时判为本地手工修改；
+            // 旧版清单/无主文件的未知来源不做假阳性指控（写回新清单后即恢复精确检测）
+            let edited = match &old {
+                Some(o) if *o != content => match self.prev.get(&rel) {
+                    Some(Some(h)) => &state::sha256_hex(o.as_bytes()) != h,
+                    _ => false,
+                },
+                _ => false,
+            };
+            match old {
+                Some(o) if edited => {
+                    self.diff.conflicts.push(rel.clone());
+                    self.hashed.push(format!("{rel}\n{o}"));
+                    self.managed.push(rel.clone());
+                    if let Some(Some(h)) = self.prev.get(&rel) {
+                        self.hashes.insert(rel, Some(h.clone()));
+                    }
+                    return Ok(());
+                }
+                Some(o) if o == content => self.diff.unchanged.push(rel.clone()),
                 Some(_) => {
                     if let Some(parent) = target.parent() {
                         std::fs::create_dir_all(parent)?;
@@ -468,7 +498,9 @@ pub fn generate(ws: &Workspace, out_dir: &Path) -> Result<GenerateReport> {
                 }
             }
             self.hashed.push(format!("{rel}\n{content}"));
-            self.managed.push(rel);
+            self.managed.push(rel.clone());
+            self.hashes
+                .insert(rel, Some(state::sha256_hex(content.as_bytes())));
             Ok(())
         }
 
@@ -476,6 +508,7 @@ pub fn generate(ws: &Workspace, out_dir: &Path) -> Result<GenerateReport> {
         fn preserve(&mut self, out_dir: &Path, rel: &str) {
             self.preserved.push(rel.to_string());
             self.managed.push(rel.to_string());
+            self.hashes.insert(rel.to_string(), None);
             if let Ok(raw) = std::fs::read_to_string(out_dir.join(rel)) {
                 self.hashed.push(format!("{rel}\n{raw}"));
             }
@@ -488,6 +521,8 @@ pub fn generate(ws: &Workspace, out_dir: &Path) -> Result<GenerateReport> {
         diff: FileDiff::default(),
         managed: Vec::new(),
         hashed: Vec::new(),
+        prev: &prev_manifest,
+        hashes: Default::default(),
     };
     for (rel, tpl) in templates {
         let target = out_dir.join(rel);
@@ -518,7 +553,7 @@ pub fn generate(ws: &Workspace, out_dir: &Path) -> Result<GenerateReport> {
     }
     // 上一轮引擎管理、本轮不再产出的文件：只报告，不删除（用户可能已挪作他用）
     o.diff.removed = prev_manifest
-        .iter()
+        .keys()
         .filter(|f| *f != MANIFEST_FILE && !o.managed.contains(f))
         .cloned()
         .collect();
@@ -527,14 +562,17 @@ pub fn generate(ws: &Workspace, out_dir: &Path) -> Result<GenerateReport> {
         &mut o.diff.modified,
         &mut o.diff.unchanged,
         &mut o.diff.removed,
+        &mut o.diff.conflicts,
     ] {
         list.sort();
     }
-    o.managed.push(MANIFEST_FILE.to_string());
-    o.managed.sort();
+    for rel in &o.managed {
+        o.hashes.entry(rel.clone()).or_default();
+    }
+    o.hashes.insert(MANIFEST_FILE.to_string(), None);
     std::fs::write(
         out_dir.join(MANIFEST_FILE),
-        serde_json::to_string_pretty(&o.managed)?,
+        serde_json::to_string_pretty(&o.hashes)?,
     )?;
 
     o.hashed.sort();
@@ -732,13 +770,50 @@ mod tests {
 
         // 上轮管理、本轮不再产出的文件 → removed（只报告不删除）
         let manifest_path = out.join(MANIFEST_FILE);
-        let mut manifest: Vec<String> =
+        let mut manifest: std::collections::BTreeMap<String, Option<String>> =
             serde_json::from_str(&std::fs::read_to_string(&manifest_path).unwrap()).unwrap();
-        manifest.push("app/zombie.py".to_string());
+        manifest.insert("app/zombie.py".to_string(), None);
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
         let r5 = generate(&ws, &out).unwrap();
         assert!(r5.diff.removed.contains(&"app/zombie.py".to_string()));
         assert!(!out.join("app/zombie.py").exists());
+    }
+
+    #[test]
+    fn warns_instead_of_silently_overwriting_local_edits() {
+        let ws = setup("conflict");
+        let out = ws.root.join("output");
+        generate(&ws, &out).unwrap();
+
+        // 无 ICEWRIGHT-CUSTOM 标记的手工改动：重生成不得静默覆盖
+        let main = out.join("app/main.py");
+        std::fs::write(&main, "print('我的本地改动')\n").unwrap();
+        let r = generate(&ws, &out).unwrap();
+        assert_eq!(r.diff.conflicts, vec!["app/main.py".to_string()]);
+        assert!(!r.diff.modified.iter().any(|f| f.contains("main.py")));
+        assert_eq!(
+            std::fs::read_to_string(&main).unwrap(),
+            "print('我的本地改动')\n"
+        );
+        assert!(!r.written.iter().any(|f| f == "app/main.py"));
+
+        // 冲突态幂等：再来一轮仍是冲突，本地版本保持不变
+        let r2 = generate(&ws, &out).unwrap();
+        assert_eq!(r2.diff.conflicts, vec!["app/main.py".to_string()]);
+        assert_eq!(r2.output_hash, r.output_hash);
+        assert_eq!(
+            std::fs::read_to_string(&main).unwrap(),
+            "print('我的本地改动')\n"
+        );
+
+        // 删除本地文件后重生成 → 引擎版本回归（created），冲突消除
+        std::fs::remove_file(&main).unwrap();
+        let r3 = generate(&ws, &out).unwrap();
+        assert!(r3.diff.conflicts.is_empty());
+        assert!(r3.diff.created.contains(&"app/main.py".to_string()));
+        assert!(std::fs::read_to_string(&main)
+            .unwrap()
+            .contains("AUTO-GENERATED"));
     }
 
     #[test]
