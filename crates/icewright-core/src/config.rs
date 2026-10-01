@@ -10,12 +10,25 @@ pub struct Config {
     pub datasource: DatasourceCfg,
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct WorkspaceCfg {
     pub name: String,
     pub pack: String,
     pub stack: String,
+    /// CLI 文案语言：zh | en（空或未识别值由调用方回退 zh）
+    pub locale: String,
+}
+
+impl Default for WorkspaceCfg {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            pack: String::new(),
+            stack: String::new(),
+            locale: "zh".to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -126,6 +139,7 @@ mod tests {
         let template = crate::workspace::DEFAULT_CONFIG_TOML.replace("{name}", "t");
         let cfg: Config = toml::from_str(&template).unwrap();
         assert_eq!(cfg.workspace.stack, "python");
+        assert_eq!(cfg.workspace.locale, "zh");
         assert!(cfg.model.key_ref.is_empty());
     }
 
@@ -141,6 +155,8 @@ mod tests {
         .unwrap();
         let cfg = set_and_save(&p, "model.base_url", "https://api.example.com/v1").unwrap();
         assert_eq!(cfg.model.base_url, "https://api.example.com/v1");
+        let cfg = set_and_save(&p, "workspace.locale", "en").unwrap();
+        assert_eq!(cfg.workspace.locale, "en");
         assert!(set_and_save(&p, "model.unknown_key", "x").is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -11,6 +11,7 @@
 - **生成系统不落业务数据**：会话槽位放 Redis，业务数据运行时实时调用客户核心系统 API（接口契约驱动，支持 mock 回放评测）。自带多语言聊天页面（zh/en 访客可选），固定话术与模型回复均跟随所选语言。
 - **可断点续跑**：每个 workspace 独立隔离，状态机可恢复；产物任何变更自动作废已有人工确认，杜绝"批过的设计"与"生成的代码"脱节。
 - **自带模型接入（BYOK）**：任何 OpenAI-compatible 端点均可；供应商目录 + 在线模型发现，接入点与模型名不写死。
+- **双语界面**：构建器 CLI 文案 zh/en 可选（`workspace.locale` 或 `ICERIGHT_LOCALE`）。
 
 ## 安装
 
@@ -47,6 +48,7 @@ icewright delivery approve my-claim --by 张三       # 闸门B
 name = "my-claim"
 pack = "insurance/auto-claim@0.1.0"   # 行业包
 stack = "python"                       # python | java | go(experimental)
+locale = "zh"                          # CLI 文案语言：zh | en（见下"界面语言"）
 
 [model]
 base_url = "https://api.deepseek.com/v1"
@@ -62,6 +64,10 @@ key_ref = "env://DEEPSEEK_API_KEY"     # 见下"模型接入与密钥"
 #port = 6379
 #key_ref = "keyring://my-claim/redis"
 ```
+
+### 界面语言（zh / en）
+
+构建器 CLI 输出文案支持中英切换，优先级：环境变量 `ICERIGHT_LOCALE`（临时覆盖）> `workspace.locale`（持久，默认 zh）；`icewright config set <ws> workspace.locale en` 即时生效（该条输出即用新语言）。生成出来的客服系统前端语言不在此列——它自带聊天页面（`GET /`），访客在页面右上角选择 zh/en，固定话术与模型回复都跟随所选语言，未知语言回退 zh。clap 帮助文案与引擎内部报错目前仍为中文，随桌面客户端阶段一并 i18n。
 
 ### 模型接入与密钥（BYOK）
 
