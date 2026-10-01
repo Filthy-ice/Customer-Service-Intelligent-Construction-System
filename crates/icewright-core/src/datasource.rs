@@ -79,6 +79,38 @@ pub fn redis_probe(
     }
 }
 
+/// Redis 预置键值（评测 setup 用）：可选 AUTH，SET key value EX ttl，期待 +OK。
+pub fn redis_set(
+    host: &str,
+    port: u16,
+    password: Option<&str>,
+    key: &str,
+    value: &str,
+    ttl_secs: u32,
+    timeout: Duration,
+) -> Result<(), String> {
+    let mut sock = connect(host, port, timeout)?;
+    if let Some(pw) = password {
+        sock.write_all(&resp_command("AUTH", &[pw]))
+            .map_err(|e| format!("AUTH 发送失败: {e}"))?;
+        let resp = read_line(&mut sock)?;
+        if resp.starts_with('-') && !resp.contains("no password") {
+            return Err(format!("AUTH 被拒: {resp}"));
+        }
+    }
+    sock.write_all(&resp_command(
+        "SET",
+        &[key, value, "EX", &ttl_secs.to_string()],
+    ))
+    .map_err(|e| format!("SET 发送失败: {e}"))?;
+    let resp = read_line(&mut sock)?;
+    if resp == "+OK" {
+        Ok(())
+    } else {
+        Err(format!("SET 非预期响应: {resp}"))
+    }
+}
+
 /// MySQL 探测：读取服务端握手包首字节协议版本（期望 10），并解析 server 版本串。
 /// 仅证明对端确为 MySQL 服务，不做登录（表级预检在 M2 随驱动接入）。
 pub fn mysql_probe(host: &str, port: u16, timeout: Duration) -> Result<String, String> {
@@ -145,6 +177,40 @@ mod tests {
             .unwrap_or(6379);
         let out = redis_probe(&host, port, pass.as_deref(), Duration::from_secs(3)).unwrap();
         assert_eq!(out, "PONG");
+    }
+
+    #[test]
+    fn redis_set_and_readback_if_configured() {
+        let Some(host) = env("IW_REDIS_HOST") else {
+            eprintln!("跳过：未设置 IW_REDIS_HOST");
+            return;
+        };
+        let port = env("IW_REDIS_PORT")
+            .and_then(|p| p.parse().ok())
+            .unwrap_or(6379);
+        let key = "iw:engine-selftest:seed";
+        redis_set(
+            &host,
+            port,
+            env("REDISCLI_AUTH").as_deref(),
+            key,
+            r#"{"a":1}"#,
+            60,
+            Duration::from_secs(3),
+        )
+        .unwrap();
+        // 读回验证：GET
+        let mut sock = connect(&host, port, Duration::from_secs(3)).unwrap();
+        if let Some(pw) = env("REDISCLI_AUTH") {
+            sock.write_all(&resp_command("AUTH", &[&pw])).unwrap();
+            let _ = read_line(&mut sock);
+        }
+        sock.write_all(&resp_command("GET", &[key])).unwrap();
+        let head = read_line(&mut sock).unwrap();
+        assert!(head.starts_with('$'), "bulk expected, got {head}");
+        let body = read_line(&mut sock).unwrap();
+        assert_eq!(body, r#"{"a":1}"#);
+        sock.write_all(&resp_command("DEL", &[key])).unwrap();
     }
 
     #[test]

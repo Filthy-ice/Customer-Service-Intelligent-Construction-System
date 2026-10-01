@@ -66,7 +66,13 @@ def answer(session_id: str, message: str) -> dict:
             reply = "您的诉求已记录，但按行业规则 %s 该类请求需人工受理，正在为您转接。" % r.get("id", "")
             return {"session_id": session_id, "reply": reply, "matched_rules": matched_ids}
 
-    # 3) 决策规则：可确定性处置的不走模型
+    # 3) 升级/接管类：命中即转人工并给出规则依据（原因必须可追溯）
+    for r in matched:
+        if r.get("enforcement_point") == "takeover":
+            reply = "检测到需要人工介入的情形（依据行业规则 %s），已为您转接人工客服。" % r.get("id", "")
+            return {"session_id": session_id, "reply": reply, "matched_rules": matched_ids}
+
+    # 4) 决策规则：可确定性处置的不走模型
     for r in matched:
         action = rule_engine.decision_for(r, facts)
         if not action:

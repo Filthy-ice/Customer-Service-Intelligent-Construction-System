@@ -2,6 +2,7 @@ pub mod config;
 pub mod datasource;
 pub mod delivery;
 pub mod design;
+pub mod evaluate;
 pub mod extract;
 pub mod generate;
 pub mod model;

@@ -59,6 +59,13 @@ enum Cmd {
         #[command(subcommand)]
         action: DeliveryAction,
     },
+    /// 评测回放：对运行中的生成系统执行 artifacts/evals/eval.json 用例
+    Evaluate {
+        ws: String,
+        /// 生成系统基址，如 http://127.0.0.1:8000
+        #[arg(long)]
+        url: String,
+    },
     /// 模型接入探测（最小补全请求验证端点/密钥/模型三件套）
     Model {
         #[command(subcommand)]
@@ -547,6 +554,38 @@ fn cmd_delivery(action: &DeliveryAction) -> Result<()> {
     Ok(())
 }
 
+fn cmd_evaluate(ws_id: &str, url: &str) -> Result<()> {
+    let ws = Workspace::open(ws_id)?;
+    let outcomes = icewright_core::evaluate::evaluate(&ws, url)?;
+    for o in &outcomes {
+        println!(
+            "  {:<16} {:<16} {:>8}  {}",
+            o.id,
+            o.hardness,
+            match o.status {
+                icewright_core::evaluate::CaseStatus::Pass => "PASS",
+                icewright_core::evaluate::CaseStatus::Fail => "FAIL",
+                icewright_core::evaluate::CaseStatus::Deferred => "DEFER",
+            },
+            o.detail.chars().take(100).collect::<String>()
+        );
+    }
+    let breached = outcomes
+        .iter()
+        .any(|o| o.hardness == "hard" && o.status == icewright_core::evaluate::CaseStatus::Fail);
+    icewright_core::evaluate::write_stage_eval_failure(&ws, breached)?;
+    let total = outcomes.len();
+    let passed = outcomes
+        .iter()
+        .filter(|o| o.status == icewright_core::evaluate::CaseStatus::Pass)
+        .count();
+    println!("评测完成：{passed}/{total} 通过；结论写入 artifacts/delivery/eval-result.json");
+    if breached {
+        anyhow::bail!("hard 红线用例未通过（S6 已记 eval_failed），修复后重跑评测")
+    }
+    Ok(())
+}
+
 fn cmd_contract_check() -> Result<()> {
     let reports = icewright_artifact::selftest()?;
     let mut failed = 0;
@@ -592,6 +631,7 @@ fn main() -> Result<()> {
         Cmd::Generate { ws, out } => cmd_generate(ws, out.as_deref()),
         Cmd::Verify { ws, out, python } => cmd_verify(ws, out.as_deref(), python.as_deref()),
         Cmd::Delivery { action } => cmd_delivery(action),
+        Cmd::Evaluate { ws, url } => cmd_evaluate(ws, url),
         Cmd::Model { action } => match action {
             ModelAction::Probe { ws } => cmd_model_probe(ws),
         },

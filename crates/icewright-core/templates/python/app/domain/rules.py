@@ -39,15 +39,24 @@ def load_rules() -> list[dict]:
     return [r for r in rules if isinstance(r, dict)]
 
 
+def _lookup_fact(field: str, facts: dict):
+    """规则条件引用数据字典 id（FLD-xxx），会话事实用槽位名——两种键都尝试。"""
+    if field in facts:
+        return True, facts[field]
+    if field.startswith("FLD-") and field[4:] in facts:
+        return True, facts[field[4:]]
+    return False, None
+
+
 def _condition_met(cond: dict, facts: dict) -> bool:
     op = _OPS.get(cond.get("op", ""))
     if op is None:
         return False
-    field = cond.get("field", "")
-    if field not in facts:
+    found, value = _lookup_fact(cond.get("field", ""), facts)
+    if not found:
         return False
     try:
-        return bool(op(facts[field], cond.get("value")))
+        return bool(op(value, cond.get("value")))
     except TypeError:
         return False
 
@@ -56,7 +65,7 @@ def rule_matches(rule: dict, facts: dict) -> bool:
     conds = rule.get("conditions") or rule.get("condition") or []
     if not conds:
         return False
-    logic = rule.get("condition_logic", "all")
+    logic = rule.get("condition_logic", "any")  # 与契约默认值一致
     results = [_condition_met(c, facts) for c in conds]
     return all(results) if logic == "all" else any(results)
 
