@@ -166,31 +166,38 @@ pub fn dangling_field_refs(rules: &Value, dictionary: Option<&Value>) -> Vec<Str
     if let Some(rules_arr) = rules["rules"].as_array() {
         for rule in rules_arr {
             let id = rule["id"].as_str().unwrap_or("?");
-            collect_field_refs(&rule["condition"], &mut |r| {
-                if !defined.contains(&r) {
+            for r in collect_used_fields(rule) {
+                if !defined.contains(&r.as_str()) {
                     dangling.push(format!("{id} 引用了字典中不存在的 {r}"));
                 }
-            });
+            }
         }
     }
     dangling
 }
 
-fn collect_field_refs(v: &Value, visit: &mut dyn FnMut(&str)) {
+/// 递归收集一条规则里所有 `{"field": "FLD-..."}` 引用（可能有重复）。
+pub fn collect_used_fields(v: &Value) -> Vec<String> {
+    let mut out = Vec::new();
+    walk(v, &mut out);
+    out
+}
+
+fn walk(v: &Value, out: &mut Vec<String>) {
     match v {
         Value::Object(map) => {
             if let Some(s) = map.get("field").and_then(|f| f.as_str()) {
                 if s.starts_with("FLD-") {
-                    visit(s);
+                    out.push(s.to_string());
                 }
             }
             for child in map.values() {
-                collect_field_refs(child, visit);
+                walk(child, out);
             }
         }
         Value::Array(arr) => {
             for child in arr {
-                collect_field_refs(child, visit);
+                walk(child, out);
             }
         }
         _ => {}

@@ -1,4 +1,5 @@
 pub mod config;
+pub mod design;
 pub mod extract;
 pub mod model;
 pub mod preflight;

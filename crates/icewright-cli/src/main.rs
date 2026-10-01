@@ -33,6 +33,11 @@ enum Cmd {
         #[command(subcommand)]
         action: SecretAction,
     },
+    /// S4 设计文档渲染与闸门A 确认
+    Design {
+        #[command(subcommand)]
+        action: DesignAction,
+    },
     /// 模型接入探测（最小补全请求验证端点/密钥/模型三件套）
     Model {
         #[command(subcommand)]
@@ -77,6 +82,34 @@ enum ConfigAction {
 enum SecretAction {
     /// 从 stdin 读密钥并存储到 keyring 引用对应位置
     Set { r#ref: String },
+}
+
+#[derive(Subcommand)]
+enum DesignAction {
+    /// 渲染设计文档并进入 waiting_gate（产物变更会作废旧确认）
+    Render { ws: String },
+    /// 打印设计文档
+    Show { ws: String },
+    /// 闸门A：批准（绑定当前产物哈希）
+    Approve {
+        ws: String,
+        #[arg(long)]
+        by: String,
+        #[arg(long)]
+        note: Option<String>,
+        #[arg(long)]
+        role: Option<String>,
+    },
+    /// 闸门A：驳回（必须附注）
+    Reject {
+        ws: String,
+        #[arg(long)]
+        by: String,
+        #[arg(long)]
+        note: String,
+        #[arg(long)]
+        role: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -300,6 +333,47 @@ fn cmd_model_probe(ws_id: &str) -> Result<()> {
     }
 }
 
+fn parse_role(s: Option<&str>) -> Result<Option<state::GateRole>> {
+    match s {
+        None => Ok(None),
+        Some("business_owner") => Ok(Some(state::GateRole::BusinessOwner)),
+        Some("tech_reviewer") => Ok(Some(state::GateRole::TechReviewer)),
+        Some(other) => anyhow::bail!("role 只允许 business_owner|tech_reviewer，收到 {other:?}"),
+    }
+}
+
+fn cmd_design(action: &DesignAction) -> Result<()> {
+    use icewright_core::design;
+    match action {
+        DesignAction::Render { ws } => {
+            let ws = Workspace::open(ws)?;
+            let (path, changed) = design::publish(&ws)?;
+            println!("设计文档已渲染: {path}");
+            if changed {
+                println!("内容较上次有变化：既往闸门A 确认已作废，需重新确认");
+            }
+            println!("审阅后执行 `icewright design approve|reject {ws_id}`", ws_id = ws.id);
+        }
+        DesignAction::Show { ws } => {
+            let ws = Workspace::open(ws)?;
+            let p = ws.artifact_path(design::DESIGN_DOC);
+            print!("{}", std::fs::read_to_string(&p).unwrap_or_else(|_| format!("尚未渲染: {}", p.display())));
+        }
+        DesignAction::Approve { ws, by, note, role } => {
+            let ws = Workspace::open(ws)?;
+            design::decide(&ws, state::GateDecision::Approved, by, parse_role(role.as_deref())?, note.as_deref())?;
+            println!("闸门A 已批准（绑定当前产物哈希）。下一步：S5 代码生成");
+        }
+        DesignAction::Reject { ws, by, note, role } => {
+            let ws = Workspace::open(ws)?;
+            design::decide(&ws, state::GateDecision::Rejected, by, parse_role(role.as_deref())?, Some(note))?;
+            println!("闸门A 已驳回：{note}");
+            println!("修订语料/产物后重新 `icewright design render {}`", ws.id);
+        }
+    }
+    Ok(())
+}
+
 fn cmd_contract_check() -> Result<()> {
     let reports = icewright_artifact::selftest()?;
     let mut failed = 0;
@@ -341,6 +415,7 @@ fn main() -> Result<()> {
         Cmd::Secret { action } => match action {
             SecretAction::Set { r#ref } => cmd_secret_set(r#ref),
         },
+        Cmd::Design { action } => cmd_design(action),
         Cmd::Model { action } => match action {
             ModelAction::Probe { ws } => cmd_model_probe(ws),
         },
