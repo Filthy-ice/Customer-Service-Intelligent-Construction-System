@@ -7,6 +7,7 @@ pub mod model;
 pub mod preflight;
 pub mod secrets;
 pub mod state;
+pub mod verify;
 pub mod workspace;
 
 pub use state::PipelineState;

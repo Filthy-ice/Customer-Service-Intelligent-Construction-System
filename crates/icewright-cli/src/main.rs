@@ -45,6 +45,15 @@ enum Cmd {
         #[arg(long)]
         out: Option<String>,
     },
+    /// S6 自动验证：对生成工程跑编译与单测，结论写回状态
+    Verify {
+        ws: String,
+        #[arg(long)]
+        out: Option<String>,
+        /// 目标栈解释器（缺省 $IW_PYTHON 或 python3）
+        #[arg(long)]
+        python: Option<String>,
+    },
     /// 模型接入探测（最小补全请求验证端点/密钥/模型三件套）
     Model {
         #[command(subcommand)]
@@ -431,6 +440,32 @@ fn cmd_generate(ws_id: &str, out: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+fn cmd_verify(ws_id: &str, out: Option<&str>, python: Option<&str>) -> Result<()> {
+    let ws = Workspace::open(ws_id)?;
+    let out_dir = match out {
+        Some(p) => std::path::PathBuf::from(p),
+        None => ws.root.join("output"),
+    };
+    let py = python
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(icewright_core::verify::default_python);
+    let checks = icewright_core::verify::verify(&ws, &out_dir, &py)?;
+    for c in &checks {
+        println!(
+            "  {}  {:<10} {}",
+            if c.ok { "PASS" } else { "FAIL" },
+            c.name,
+            c.detail.chars().take(120).collect::<String>()
+        );
+    }
+    if checks.iter().all(|c| c.ok) {
+        println!("S6 通过：可进入 S7 验收交付（评测集回放随后接入）");
+        Ok(())
+    } else {
+        anyhow::bail!("S6 未通过（状态已记为 failed），修复后重跑 `icewright verify {ws_id}`")
+    }
+}
+
 fn cmd_contract_check() -> Result<()> {
     let reports = icewright_artifact::selftest()?;
     let mut failed = 0;
@@ -474,6 +509,7 @@ fn main() -> Result<()> {
         },
         Cmd::Design { action } => cmd_design(action),
         Cmd::Generate { ws, out } => cmd_generate(ws, out.as_deref()),
+        Cmd::Verify { ws, out, python } => cmd_verify(ws, out.as_deref(), python.as_deref()),
         Cmd::Model { action } => match action {
             ModelAction::Probe { ws } => cmd_model_probe(ws),
         },
