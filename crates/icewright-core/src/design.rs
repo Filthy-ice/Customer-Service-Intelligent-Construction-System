@@ -584,7 +584,7 @@ mod tests {
         assert!(md.contains("### 生成物 Agent 框架选型"));
         assert!(md.contains("agentscope"));
         assert!(md.contains("★"));
-        assert!(md.contains("模板集成实施中"));
+        assert!(md.contains("S5 模板已按该框架构建生成物"));
 
         let p = ws.root.join("icewright.toml");
         crate::config::set_and_save(&p, "workspace.agent_framework", "tensorflow").unwrap();
@@ -594,6 +594,7 @@ mod tests {
         let md = render_design(&ws).unwrap();
         assert!(md.contains("用户覆盖默认"));
         assert!(md.contains("langgraph ★"));
+        assert!(md.contains("模板集成实施中"), "未集成的候选须如实标注状态");
         let _ = std::fs::remove_dir_all(&base);
     }
 }

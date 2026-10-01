@@ -38,7 +38,7 @@ const PYTHON: &[Framework] = &[
         stars: "32.6k",
         pros: "skill/工具驱动的 ReAct 与多智能体，OpenAI-compatible 模型接入，社区活跃日更",
         cons: "复杂状态图能力弱于 LangGraph（需以规则引擎侧兜底，恰合本系统确定性规则定位）",
-        integration: Integration::Planned,
+        integration: Integration::Implemented,
     },
     Framework {
         name: "langgraph",

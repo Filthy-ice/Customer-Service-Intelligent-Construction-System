@@ -3,3 +3,4 @@ uvicorn[standard]>=0.29
 redis>=5.0
 pymysql>=1.1
 pytest>=8.0
+agentscope>=2.0,<3.0
