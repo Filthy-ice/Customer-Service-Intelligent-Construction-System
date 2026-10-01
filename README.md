@@ -42,6 +42,8 @@ icewright delivery render my-claim                 # S7 交付报告
 icewright delivery approve my-claim --by 张三       # 闸门B
 ```
 
+需求变更后走 S8 增量重生成：改语料 → `pipeline extract --kinds <受影响类型>` → `design render`（旧闸门自动作废）→ 重新过闸门A → `build`/`generate`。引擎按 `ICEWRIGHT-MANIFEST.json` 追踪其托管文件，输出文件级 diff（新增/更新/未变/移除；移除仅报告不删除）；带 `# ICEWRIGHT-CUSTOM` 标记的用户定制文件永不被覆盖。
+
 ## 配置
 
 每个 workspace 根目录下的 `icewright.toml` 是生效配置（TOML，Rust 生态通用格式），全部键可用 `icewright config set <ws> <点号键> <值>` 写入：
