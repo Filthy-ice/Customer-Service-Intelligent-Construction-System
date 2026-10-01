@@ -40,6 +40,7 @@ pub fn render_design(ws: &Workspace) -> Result<String> {
     out.push_str("## 1. 系统概览\n\n");
     out.push_str(&format!("- 行业包：{}\n", nv(&cfg.workspace.pack)));
     out.push_str(&format!("- 目标栈：{}\n", cfg.workspace.stack));
+    out.push_str("- 前端语言：zh / en（生成项目自带聊天页面，访客可切换；未知语言回退 zh）\n");
     out.push_str(&format!(
         "- 模型：{} @ {}（密钥引用：{}）\n",
         nv(&cfg.model.model),

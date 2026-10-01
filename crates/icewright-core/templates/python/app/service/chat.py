@@ -5,6 +5,7 @@ import urllib.error
 import urllib.request
 
 from app.config.settings import settings
+from app.domain import i18n
 from app.domain import rules as rule_engine
 from app.integration import core_client
 from app.service import session as session_service
@@ -16,10 +17,11 @@ def _chat_url() -> str:
     return settings.model_base_url.rstrip("/") + "/chat/completions"
 
 
-def _call_model(message: str, injections: list[str]) -> str:
-    system = "你是客服系统「%s」，遵守以下行业规则要求作答：\n%s" % (
+def _call_model(message: str, injections: list[str], language: str) -> str:
+    system = "你是客服系统「%s」，遵守以下行业规则要求作答：\n%s\n%s" % (
         settings.project,
         "\n".join("- " + s for s in injections) or "- 无附加规则",
+        i18n.t("model_language", language),
     )
     body = json.dumps(
         {
@@ -44,7 +46,8 @@ def _call_model(message: str, injections: list[str]) -> str:
     return payload["choices"][0]["message"]["content"]
 
 
-def answer(session_id: str, message: str) -> dict:
+def answer(session_id: str, message: str, language: str = "zh") -> dict:
+    lang = i18n.normalize(language)
     rules = rule_engine.load_rules()
     slots = session_service.load_slots(session_id)
     facts = dict(slots)
@@ -54,23 +57,29 @@ def answer(session_id: str, message: str) -> dict:
     matched = rule_engine.match_rules(rules, facts)
     matched_ids = [str(r.get("id", "")) for r in matched]
 
+    def done(reply_key: str, rule_id: str = "") -> dict:
+        reply = i18n.t(reply_key, lang, rule=rule_id) if rule_id else i18n.t(reply_key, lang)
+        return {
+            "session_id": session_id,
+            "reply": reply,
+            "matched_rules": matched_ids,
+            "language": lang,
+        }
+
     # 1) 硬拦截：pre_validator 规则命中即挡下，绝不进模型
     for r in matched:
         if r.get("enforcement_point") == "pre_validator":
-            reply = "该请求触碰行业规则 %s 的硬性限制，已转人工处理。" % r.get("id", "")
-            return {"session_id": session_id, "reply": reply, "matched_rules": matched_ids}
+            return done("pre_validator", str(r.get("id", "")))
 
     # 2) 禁语扫描：forbidden_pattern 直接匹配用户消息
     for r in rules:
         if r.get("type") == "forbidden_pattern" and rule_engine.pattern_hits_message(r, message):
-            reply = "您的诉求已记录，但按行业规则 %s 该类请求需人工受理，正在为您转接。" % r.get("id", "")
-            return {"session_id": session_id, "reply": reply, "matched_rules": matched_ids}
+            return done("forbidden", str(r.get("id", "")))
 
     # 3) 升级/接管类：命中即转人工并给出规则依据（原因必须可追溯）
     for r in matched:
         if r.get("enforcement_point") == "takeover":
-            reply = "检测到需要人工介入的情形（依据行业规则 %s），已为您转接人工客服。" % r.get("id", "")
-            return {"session_id": session_id, "reply": reply, "matched_rules": matched_ids}
+            return done("takeover", str(r.get("id", "")))
 
     # 4) 决策规则：可确定性处置的不走模型
     for r in matched:
@@ -79,16 +88,20 @@ def answer(session_id: str, message: str) -> dict:
             continue
         kind = action.get("kind")
         if kind == "transfer_human":
-            reply = "该情形符合转人工条件（规则 %s），已为您排队人工客服。" % r.get("id", "")
-            return {"session_id": session_id, "reply": reply, "matched_rules": matched_ids}
+            return done("transfer", str(r.get("id", "")))
         if kind == "set_slot":
             slots = session_service.merge_slots(session_id, action.get("set") or {})
             facts.update(slots)
 
     try:
-        reply = _call_model(message, rule_engine.collect_prompt_injections(rules))
+        reply = _call_model(message, rule_engine.collect_prompt_injections(rules), lang)
     except (urllib.error.URLError, KeyError, TimeoutError, OSError, ValueError):
-        reply = "智能助手暂时不可用，已为您转接人工客服，请稍候。"
+        reply = i18n.t("model_unavailable", lang)
 
     session_service.merge_slots(session_id, {"turns": int(slots.get("turns", 0)) + 1})
-    return {"session_id": session_id, "reply": reply, "matched_rules": matched_ids}
+    return {
+        "session_id": session_id,
+        "reply": reply,
+        "matched_rules": matched_ids,
+        "language": lang,
+    }

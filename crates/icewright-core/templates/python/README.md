@@ -8,8 +8,12 @@
 #   uvicorn app.main:app --host 0.0.0.0 --port 8000
 #
 # 冒烟对话：
+#   浏览器打开 http://127.0.0.1:8000/ 即为聊天页面（右上角可切换 中文/English，
+#   所选语言随请求提交，固定话术与模型回复均使用该语言）。
 #   curl -X POST localhost:8000/chat -H 'content-type: application/json' \
-#     -d '{"session_id":"s1","message":"我的案子CLM-0001材料齐了吗"}'
+#     -d '{"session_id":"s1","message":"我的案子CLM-0001材料齐了吗","language":"zh"}'
+#   curl -X POST localhost:8000/chat -H 'content-type: application/json' \
+#     -d '{"session_id":"s1","message":"Is my claim CLM-0001 ready?","language":"en"}'
 #   curl localhost:8000/healthz
 #
 # 测试：pytest tests/

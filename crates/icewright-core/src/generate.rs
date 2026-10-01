@@ -69,8 +69,16 @@ static TEMPLATES: &[(&str, &str)] = &[
         include_str!("../templates/python/app/domain/rules.py"),
     ),
     (
+        "app/domain/i18n.py",
+        include_str!("../templates/python/app/domain/i18n.py"),
+    ),
+    (
         "app/domain/skills.py",
         include_str!("../templates/python/app/domain/skills.py"),
+    ),
+    (
+        "static/chat.html",
+        include_str!("../templates/python/static/chat.html"),
     ),
     (
         "app/integration/__init__.py",
@@ -87,6 +95,10 @@ static TEMPLATES: &[(&str, &str)] = &[
     (
         "tests/test_rules.py",
         include_str!("../templates/python/tests/test_rules.py"),
+    ),
+    (
+        "tests/test_i18n.py",
+        include_str!("../templates/python/tests/test_i18n.py"),
     ),
     (
         "tests/test_skills.py",
@@ -365,6 +377,10 @@ mod tests {
         assert!(main_py.contains(&ws.id), "project_name 槽位应渲染");
         assert!(!main_py.contains("{{"));
         assert!(out.join("app/data/rules.json").exists());
+        assert!(out.join("app/domain/i18n.py").exists());
+        let chat_html = std::fs::read_to_string(out.join("static/chat.html")).unwrap();
+        assert!(!chat_html.contains("{{"), "静态页面槽位应全部渲染");
+        assert!(chat_html.contains(&ws.id), "页面标题应含项目名");
 
         let st = state::load_state(&ws.state_path()).unwrap();
         assert_eq!(st.stage(StageId::S5).unwrap().status, StageStatus::Approved);

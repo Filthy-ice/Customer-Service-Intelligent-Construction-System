@@ -19,11 +19,13 @@ impl Check {
     }
 }
 
-const REQUIRED_FILES: [&str; 4] = [
+const REQUIRED_FILES: [&str; 6] = [
     "requirements.txt",
     "app/main.py",
     "app/data/rules.json",
     "tests/test_rules.py",
+    "app/domain/i18n.py",
+    "static/chat.html",
 ];
 
 fn run_cmd(python: &Path, args: &[&str], cwd: &Path) -> (bool, String) {
