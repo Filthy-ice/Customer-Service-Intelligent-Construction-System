@@ -38,6 +38,13 @@ enum Cmd {
         #[command(subcommand)]
         action: DesignAction,
     },
+    /// S5 代码生成（要求闸门A 对当前设计产物有效）
+    Generate {
+        ws: String,
+        /// 输出目录，缺省为 workspace 的 output/
+        #[arg(long)]
+        out: Option<String>,
+    },
     /// 模型接入探测（最小补全请求验证端点/密钥/模型三件套）
     Model {
         #[command(subcommand)]
@@ -404,6 +411,26 @@ fn cmd_design(action: &DesignAction) -> Result<()> {
     Ok(())
 }
 
+fn cmd_generate(ws_id: &str, out: Option<&str>) -> Result<()> {
+    let ws = Workspace::open(ws_id)?;
+    let out_dir = match out {
+        Some(p) => std::path::PathBuf::from(p),
+        None => ws.root.join("output"),
+    };
+    let report = icewright_core::generate::generate(&ws, &out_dir)?;
+    println!(
+        "S5 生成完成：{} 个文件 → {}（output {}）",
+        report.written.len(),
+        report.out_dir.display(),
+        &report.output_hash[7..15]
+    );
+    for f in &report.preserved {
+        println!("  保留定制文件（ICEWRIGHT-CUSTOM）: {f}");
+    }
+    println!("下一步：进入生成目录安装依赖并运行测试（见 README.md），S6 自动验证随后接入");
+    Ok(())
+}
+
 fn cmd_contract_check() -> Result<()> {
     let reports = icewright_artifact::selftest()?;
     let mut failed = 0;
@@ -446,6 +473,7 @@ fn main() -> Result<()> {
             SecretAction::Set { r#ref } => cmd_secret_set(r#ref),
         },
         Cmd::Design { action } => cmd_design(action),
+        Cmd::Generate { ws, out } => cmd_generate(ws, out.as_deref()),
         Cmd::Model { action } => match action {
             ModelAction::Probe { ws } => cmd_model_probe(ws),
         },

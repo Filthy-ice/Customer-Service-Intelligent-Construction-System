@@ -2,6 +2,7 @@ pub mod config;
 pub mod datasource;
 pub mod design;
 pub mod extract;
+pub mod generate;
 pub mod model;
 pub mod preflight;
 pub mod secrets;
