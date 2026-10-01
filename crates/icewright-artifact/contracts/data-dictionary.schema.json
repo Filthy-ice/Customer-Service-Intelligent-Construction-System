@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "icewright://data-dictionary.schema.json",
+  "title": "FieldDictionary",
+  "description": "规则条件与流程分支唯一允许引用的字段全集。S3 提取规则引用了不存在的字段 → 校验失败，闸门 A 标红。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "fields"],
+  "properties": {
+    "schema_version": { "const": "0.1.0" },
+    "fields": { "type": "array", "items": { "$ref": "#/$defs/field" } }
+  },
+  "$defs": {
+    "field": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field", "type", "source"],
+      "properties": {
+        "field": { "type": "string", "pattern": "^FLD-[A-Za-z0-9_-]+$" },
+        "type": { "enum": ["string", "text", "number", "datetime", "date", "bool", "enum", "array"] },
+        "enum_values": { "type": "array", "items": { "type": "string" } },
+        "pii": { "enum": ["none", "masked", "secret"], "default": "none", "description": "masked/secret 日志落盘前脱敏" },
+        "description": { "type": "string" },
+        "source": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["kind", "ref"],
+              "properties": {
+                "kind": { "const": "api" },
+                "ref": { "type": "string", "pattern": "^API-" },
+                "jsonpath": { "type": "string" }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["kind", "ref"],
+              "properties": {
+                "kind": { "const": "session_slot" },
+                "ref": { "type": "string", "pattern": "^F-", "description": "收集该槽位的流程 id" },
+                "slot": { "type": "string" }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["kind", "expr"],
+              "properties": {
+                "kind": { "const": "derived" },
+                "expr": { "type": "string", "description": "受限表达式 DSL，只允许引用字典内字段与白名单函数" },
+                "depends_on": { "type": "array", "items": { "type": "string" }, "description": "引擎校验：全部必须是本字典内 FLD-*" }
+              }
+            }
+          ]
+        },
+        "freshness": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "api 来源字段的缓存策略（会话级）",
+          "properties": {
+            "cache_ttl_s": { "type": "integer", "default": 0 }
+          }
+        }
+      }
+    }
+  }
+}

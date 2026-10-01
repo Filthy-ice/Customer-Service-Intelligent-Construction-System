@@ -1,0 +1,38 @@
+{
+  "schema_version": "0.1.0",
+  "flows": [
+    {
+      "flow": "F-report",
+      "description": "报案受理引导",
+      "slots": [
+        { "name": "accident_time", "type": "datetime", "required": true },
+        { "name": "accident_location", "type": "text", "required": true },
+        { "name": "accident_is_injury", "type": "bool", "required": true, "branch_trigger": true },
+        { "name": "driver_license_no", "type": "id_card", "pii": "masked" },
+        { "name": "policy_no", "type": "string" }
+      ],
+      "entry": "intake",
+      "states": [
+        {
+          "id": "intake",
+          "actions": [{ "kind": "collect", "ref": "accident_time" }],
+          "transitions": [
+            { "on": "accident_is_injury == true", "to": "escalate_injury", "rule_ref": "R-AUTO-0003" },
+            { "on": "slots_complete(F-report)", "to": "survey_arrange" }
+          ]
+        },
+        {
+          "id": "survey_arrange",
+          "actions": [{ "kind": "skill_call", "ref": "SK-survey-create" }]
+        },
+        {
+          "id": "inform",
+          "actions": [{ "kind": "script", "ref": "S-report-done", "rule_ref": "R-AUTO-0004" }],
+          "transitions": [{ "on": "true", "to": "end" }]
+        },
+        { "id": "escalate_injury", "type": "terminal_takeover" },
+        { "id": "end", "type": "terminal" }
+      ]
+    }
+  ]
+}

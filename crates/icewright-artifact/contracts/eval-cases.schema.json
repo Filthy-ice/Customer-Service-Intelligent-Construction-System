@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "icewright://eval-cases.schema.json",
+  "title": "EvalCaseSuite",
+  "description": "评测用例。hard 类为硬断言（进闸门红线），hard-adversarial 单列通过率（幻觉风险指标），soft 走 llm_judge。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "suite_id", "origin", "cases"],
+  "properties": {
+    "schema_version": { "const": "0.1.0" },
+    "suite_id": { "type": "string" },
+    "origin": {
+      "enum": ["pack_baseline", "workspace_extracted", "adversarial_generated"],
+      "description": "pack_baseline=行业包自带；workspace_extracted=从本项目需求反向生成；adversarial_generated=AI 生成的对抗用例（需人工确认后才能进硬断言）"
+    },
+    "pack_ref": { "type": "string", "description": "origin=pack_baseline 时的包名+版本" },
+    "cases": { "type": "array", "items": { "$ref": "#/$defs/case" } }
+  },
+  "$defs": {
+    "turn": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "content"],
+      "properties": {
+        "role": { "enum": ["user", "assistant", "scenario_note"] },
+        "content": { "type": "string" }
+      }
+    },
+    "setup": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mock": {
+          "type": "object",
+          "description": "API-* → mock_examples.label；缺省用契约第一个成功场景",
+          "additionalProperties": { "type": "string" }
+        },
+        "session_slots": { "type": "object", "additionalProperties": true, "description": "预置槽位值（F-流程的 slot 名）" }
+      }
+    },
+    "assertion": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "output_not_matches_semantic": { "type": "string", "description": "R-*（禁语类）：输出不得命中的语义规则" },
+        "output_not_matches_regex": { "type": "string" },
+        "must_contain_any": { "type": "array", "items": { "type": "string" } },
+        "must_contain_all": { "type": "array", "items": { "type": "string" } },
+        "must_not_contain": { "type": "array", "items": { "type": "string" } },
+        "tookover": { "type": "boolean" },
+        "reason": { "enum": ["present", "absent"] },
+        "state_reached": { "type": "string" },
+        "api_called": { "type": "array", "items": { "type": "string" } },
+        "pii_masked_in_log": { "type": "boolean" },
+        "llm_judge": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["rubric_ref"],
+          "properties": {
+            "rubric_ref": { "type": "string", "description": "R-*/DOC-* 判分依据" },
+            "threshold": { "type": "number", "minimum": 0, "maximum": 1 }
+          }
+        }
+      }
+    },
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "hardness", "rule_refs", "turns", "assert"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^TC-[A-Z0-9a-z-]+$" },
+        "hardness": { "enum": ["hard", "hard-adversarial", "soft"] },
+        "rule_refs": { "type": "array", "minItems": 1, "items": { "type": "string" }, "description": "回溯：本用例验证哪些 R-*（失败定位到规则粒度）" },
+        "setup": { "$ref": "#/$defs/setup" },
+        "turns": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/turn" } },
+        "assert": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "final_turn": { "$ref": "#/$defs/assertion" },
+            "any_turn": { "$ref": "#/$defs/assertion" },
+            "session": { "$ref": "#/$defs/assertion", "description": "会话级断言：tookover/state_reached/api_called/pii_masked_in_log" }
+          }
+        },
+        "status": { "enum": ["pending", "confirmed"], "default": "confirmed" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "hardness": { "const": "soft" } } },
+          "then": { "properties": { "assert": { "type": "object", "required": ["final_turn"], "properties": { "final_turn": { "type": "object", "required": ["llm_judge"] } } } } }
+        }
+      ]
+    }
+  }
+}

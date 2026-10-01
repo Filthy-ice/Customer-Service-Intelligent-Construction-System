@@ -1,0 +1,59 @@
+{
+  "schema_version": "0.1.0",
+  "rules": [
+    {
+      "id": "R-AUTO-0001",
+      "type": "decision_rule",
+      "statement": "收到赔偿请求及完整单证后，应及时核定；情形复杂的，三十日内须作出核定，并将结果通知被保险人。",
+      "conditions": [{ "field": "FLD-claim_documents_complete", "op": "==", "value": true }],
+      "condition_logic": "all",
+      "action": { "kind": "sla", "set": { "assess_deadline_days": 30, "notify": "required" } },
+      "enforcement_point": "flow_transition",
+      "source": { "doc": "《保险法》第23条", "note": "待核验原文" },
+      "confidence": "baseline",
+      "test_cases": ["TC-AUTO-0001a"],
+      "status": "pending"
+    },
+    {
+      "id": "R-AUTO-0002",
+      "type": "forbidden_pattern",
+      "statement": "客服不得向客户承诺具体赔付金额或保证理赔结果。",
+      "patterns": [
+        { "kind": "semantic", "description": "对未核定事项作出确定性赔付承诺（如'肯定全赔''保证赔X元'）" }
+      ],
+      "enforcement_point": "post_validator",
+      "violation_action": { "rewrite_output": true, "audit_flag": "critical", "escalation": "none" },
+      "source": { "doc": "监管理赔服务禁止性规定", "note": "待核验具体文号" },
+      "confidence": "baseline",
+      "test_cases": ["TC-AUTO-0002a", "TC-AUTO-0002b"],
+      "status": "pending"
+    },
+    {
+      "id": "R-AUTO-0003",
+      "type": "escalation_trigger",
+      "statement": "涉及人伤、重大案件标准损失、争议诉讼、代位求偿的，必须转人工。",
+      "conditions": [
+        { "field": "FLD-accident_is_injury", "op": "is_true", "value": null },
+        { "field": "FLD-case_dispute_flag", "op": "is_true", "value": null }
+      ],
+      "action": { "kind": "transfer_human", "queue": "manual-claim-desk", "reason_required": true },
+      "enforcement_point": "takeover",
+      "source": { "doc": "公司理赔作业规范", "note": "使用者提供，非公开监管" },
+      "confidence": "baseline",
+      "test_cases": ["TC-AUTO-0003a"],
+      "status": "pending"
+    },
+    {
+      "id": "R-AUTO-0004",
+      "type": "script_requirement",
+      "statement": "受理报案时应完整告知：所需单证清单、查勘安排方式、时效预期与自助查询渠道。",
+      "required_items_ref": "DOC-checklist",
+      "verify": { "method": "llm_judge", "covers": "DOC-checklist", "threshold": 0.9 },
+      "enforcement_point": "prompt_injection",
+      "source": { "doc": "监管理赔服务指引", "note": "待核验" },
+      "confidence": "baseline",
+      "test_cases": ["TC-AUTO-0004a"],
+      "status": "pending"
+    }
+  ]
+}

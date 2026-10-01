@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "icewright://rules.schema.json",
+  "title": "RuleTable",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "rules"],
+  "properties": {
+    "schema_version": { "const": "0.1.0" },
+    "rules": { "type": "array", "items": { "$ref": "#/$defs/rule" } }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^(R|S|DOC|F|SK|API|FLD|TC)-[A-Za-z0-9_-]+$",
+      "description": "全局 id 命名空间：R规则 S话术 DOC清单 F流程 SK技能 API契约 FLD字典字段 TC用例"
+    },
+    "sourceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["doc"],
+      "properties": {
+        "doc": { "type": "string", "description": "出处文档名/法规名" },
+        "article": { "type": "string", "description": "条款号" },
+        "para": { "type": "string", "description": "段落/章节锚点，指向摄入语料" },
+        "verified": { "type": "boolean", "default": false, "description": "监管出处人工核验前不得为 true" },
+        "note": { "type": "string" }
+      }
+    },
+    "condition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field", "op", "value"],
+      "properties": {
+        "field": { "type": "string", "description": "必须引用 data-dictionary 中的字段 id" },
+        "op": { "enum": ["==", "!=", ">", ">=", "<", "<=", "in", "not_in", "matches", "is_true", "is_false"] },
+        "value": {}
+      }
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["script", "skill_call", "transfer_human", "sla", "notify", "set_slot", "audit_flag", "rewrite_output"] },
+        "ref": { "type": "string", "description": "kind=script 指向 S-*，skill_call 指向 SK-*" },
+        "queue": { "type": "string" },
+        "reason_required": { "type": "boolean" },
+        "set": { "type": "object" },
+        "covers": { "type": "string" }
+      }
+    },
+    "verify": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method"],
+      "properties": {
+        "method": { "enum": ["llm_judge", "keyword_check", "path_test"] },
+        "covers": { "type": "string", "description": "判分依据引用的资产 id（S-*/DOC-*）" },
+        "threshold": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "patternItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["regex", "keyword", "semantic"] },
+        "expression": { "type": "string", "description": "kind=regex/keyword 时必填" },
+        "description": { "type": "string", "description": "kind=semantic 时必填，语义判定器的 prompt 依据" }
+      }
+    },
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "statement", "enforcement_point", "source", "status"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "type": {
+          "enum": ["decision_rule", "forbidden_pattern", "escalation_trigger", "flow_constraint", "script_requirement", "tone_policy"]
+        },
+        "statement": { "type": "string", "description": "规则原文，永远保留供闸门审阅" },
+        "conditions": { "type": "array", "items": { "$ref": "#/$defs/condition" } },
+        "condition_logic": { "enum": ["all", "any"], "default": "any" },
+        "action": { "$ref": "#/$defs/action" },
+        "actions": { "type": "array", "items": { "$ref": "#/$defs/action" } },
+        "patterns": { "type": "array", "items": { "$ref": "#/$defs/patternItem" } },
+        "constraint": { "type": "object", "description": "flow_constraint 专用：转移/状态上的约束表达式" },
+        "verify": { "$ref": "#/$defs/verify" },
+        "enforcement_point": {
+          "enum": ["pre_validator", "prompt_injection", "post_validator", "flow_transition", "takeover", "none"]
+        },
+        "violation_action": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "rewrite_output": { "type": "boolean" },
+            "escalation": { "enum": ["none", "optional", "required"] },
+            "audit_flag": { "enum": ["info", "warn", "critical"] }
+          }
+        },
+        "required_items_ref": { "type": "string" },
+        "source": { "$ref": "#/$defs/sourceRef" },
+        "confidence": { "anyOf": [{ "type": "number", "minimum": 0, "maximum": 1 }, { "const": "baseline" }] },
+        "test_cases": { "type": "array", "items": { "$ref": "#/$defs/id" } },
+        "status": { "enum": ["pending", "confirmed", "doc-only"], "default": "pending" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "enum": ["decision_rule", "escalation_trigger"] } } },
+          "then": { "required": ["conditions"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "forbidden_pattern" } } },
+          "then": { "required": ["patterns"], "properties": { "enforcement_point": { "const": "post_validator" } } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "flow_constraint" } } },
+          "then": { "required": ["constraint"] }
+        },
+        {
+          "if": { "properties": { "type": { "enum": ["script_requirement", "tone_policy"] } } },
+          "then": { "required": ["verify"] }
+        }
+      ]
+    }
+  }
+}

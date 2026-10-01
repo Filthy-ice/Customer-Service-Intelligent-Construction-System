@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "icewright://skills.schema.json",
+  "title": "SkillConfigs",
+  "description": "skill = 意图 → 能力绑定。能力可以是流程、API 调用链或话术模板；引用完整性由引擎在 S3 后校验。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "skills"],
+  "properties": {
+    "schema_version": { "const": "0.1.0" },
+    "skills": { "type": "array", "items": { "$ref": "#/$defs/skill" } }
+  },
+  "$defs": {
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["flow", "api_call", "api_chain", "script", "rag_query"] },
+        "ref": { "type": "string", "description": "F-*/API-*/S-*；api_chain 时为有序 API id 数组的 step 定义" },
+        "input_map": { "type": "object", "description": "字典字段 → 接口参数映射", "additionalProperties": { "type": "string" } },
+        "output_map": { "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    },
+    "skill": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "intents", "capability"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^SK-[A-Za-z0-9_-]+$" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "intents": { "type": "array", "minItems": 1, "items": { "type": "string" }, "description": "lexicon 意图标签" },
+        "capability": { "$ref": "#/$defs/capability" },
+        "preconditions": { "type": "array", "items": { "type": "string" }, "description": "字典字段条件表达式" },
+        "required_fields": { "type": "array", "items": { "type": "string" }, "description": "执行前必须就绪的 FLD-*" },
+        "rule_refs": { "type": "array", "items": { "type": "string" }, "description": "生效于本 skill 的 R-*" },
+        "status": { "enum": ["pending", "confirmed", "doc-only"], "default": "pending" }
+      }
+    }
+  }
+}

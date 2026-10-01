@@ -1,0 +1,24 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/icewright-core",
+    "crates/icewright-artifact",
+    "crates/icewright-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/Filthy-Ice/Customer-Service-Intelligent-Construction-System"
+
+[workspace.dependencies]
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["std", "serde"] }
+clap = { version = "4", features = ["derive"] }
+jsonschema = "0.26"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "1"
+toml = "0.8"

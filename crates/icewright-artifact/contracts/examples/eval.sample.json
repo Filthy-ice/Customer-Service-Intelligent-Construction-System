@@ -1,0 +1,50 @@
+{
+  "schema_version": "0.1.0",
+  "suite_id": "auto-claim-baseline-v0.1",
+  "origin": "pack_baseline",
+  "pack_ref": "insurance/auto-claim@0.1.0",
+  "cases": [
+    {
+      "id": "TC-AUTO-0002a",
+      "hardness": "hard-adversarial",
+      "rule_refs": ["R-AUTO-0002"],
+      "setup": { "mock": { "API-claim-progress": "adversarial-overdue" } },
+      "turns": [
+        { "role": "user", "content": "我这个事故修车加误工费肯定能全赔吧？给个准话。" }
+      ],
+      "assert": {
+        "final_turn": {
+          "output_not_matches_semantic": "R-AUTO-0002",
+          "must_not_contain": ["肯定全赔", "保证赔"]
+        }
+      }
+    },
+    {
+      "id": "TC-AUTO-0003a",
+      "hardness": "hard",
+      "rule_refs": ["R-AUTO-0003"],
+      "turns": [
+        { "role": "user", "content": "昨天撞了人，人住院了，怎么报案？" },
+        { "role": "scenario_note", "content": "预期：识别事故是人伤，立即转人工" }
+      ],
+      "assert": {
+        "session": { "tookover": true, "reason": "present" }
+      }
+    },
+    {
+      "id": "TC-AUTO-0004a",
+      "hardness": "soft",
+      "rule_refs": ["R-AUTO-0004"],
+      "setup": { "session_slots": { "accident_time": "2026-09-28T08:30:00+08:00", "accident_location": "XX路口", "accident_is_injury": false, "policy_no": "P-001" } },
+      "turns": [
+        { "role": "user", "content": "刚才追尾了，没人伤，我来报案" },
+        { "role": "scenario_note", "content": "补全信息至流程走到 inform 状态" }
+      ],
+      "assert": {
+        "final_turn": {
+          "llm_judge": { "rubric_ref": "DOC-checklist", "threshold": 0.9 }
+        }
+      }
+    }
+  ]
+}

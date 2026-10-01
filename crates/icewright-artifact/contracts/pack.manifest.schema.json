@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "icewright://pack.manifest.schema.json",
+  "title": "IndustryPackManifest",
+  "description": "行业包入组契约。eval_suite 为必需组件——无评测集不成为行业包（开源 CI 硬门禁）。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "version", "target_engine", "scope", "components", "tier"],
+  "properties": {
+    "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]*(/[a-z][a-z0-9-]*)*$", "description": "层级命名：insurance/auto-claim" },
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?$" },
+    "tier": { "enum": ["official", "community"], "description": "官方包与社区包分级（R6 对策）" },
+    "target_engine": { "type": "string", "description": "semver range，如 >=0.1 <1.0" },
+    "inherits": { "type": "array", "items": { "type": "string" }, "description": "父包 name，支持多层继承，子域覆写/追加基线" },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["covers", "excludes"],
+      "properties": {
+        "covers": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "excludes": { "type": "array", "items": { "type": "string" }, "description": "闸门A明示的能力边界（如定损核赔）" }
+      }
+    },
+    "components": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["regulatory_baseline", "domain_lexicon", "flow_templates", "eval_suite", "runtime_config"],
+      "properties": {
+        "regulatory_baseline": { "type": "string", "description": "目录路径，内含 rules.*.json（须过 rules.schema）" },
+        "domain_lexicon": { "type": "string" },
+        "flow_templates": { "type": "string" },
+        "eval_suite": { "type": "string", "description": "目录路径，内含 eval.*.json；CI 门禁执行处" },
+        "runtime_config": { "type": "string" },
+        "skeleton_bindings": { "type": "string", "description": "可选：栈无关骨架 spec 的包级覆写" }
+      }
+    },
+    "rule_types_extended": { "type": "array", "items": { "type": "string" }, "description": "行业包自定义 type 仅限软/硬扩展命名；enforcement_point 枚举不可扩展（内核契约）" },
+    "changelog": { "type": "string" },
+    "regulatory_review": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "监管基线出处核验记录：official 包要求 verified 比例 100%，community 包放行但交付报告标注",
+      "required": ["verified_ratio"],
+      "properties": {
+        "verified_ratio": { "type": "number", "minimum": 0, "maximum": 1 },
+        "reviewed_by": { "type": "string" },
+        "reviewed_at": { "type": "string", "format": "date" }
+      }
+    }
+  }
+}

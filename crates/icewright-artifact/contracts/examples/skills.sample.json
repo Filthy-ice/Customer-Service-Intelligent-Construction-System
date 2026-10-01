@@ -1,0 +1,37 @@
+{
+  "schema_version": "0.1.0",
+  "skills": [
+    {
+      "id": "SK-report-accident",
+      "name": "报案受理",
+      "intents": ["report_accident", "accident_intake"],
+      "capability": { "kind": "flow", "ref": "F-report" },
+      "required_fields": [],
+      "rule_refs": ["R-AUTO-0003", "R-AUTO-0004"],
+      "status": "pending"
+    },
+    {
+      "id": "SK-progress-query",
+      "name": "理赔进度查询",
+      "intents": ["query_claim_progress"],
+      "capability": {
+        "kind": "api_call",
+        "ref": "API-claim-progress",
+        "input_map": { "caseNo": "FLD-case_no" },
+        "output_map": { "$.status": "FLD-claim_status" }
+      },
+      "preconditions": ["FLD-case_no != null"],
+      "required_fields": ["FLD-case_no"],
+      "rule_refs": ["R-AUTO-0001"],
+      "status": "pending"
+    },
+    {
+      "id": "SK-survey-create",
+      "name": "查勘预约",
+      "intents": ["arrange_survey"],
+      "capability": { "kind": "api_call", "ref": "API-survey-create" },
+      "required_fields": ["FLD-accident_time"],
+      "status": "pending"
+    }
+  ]
+}

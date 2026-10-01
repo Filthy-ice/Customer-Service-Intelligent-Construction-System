@@ -1,0 +1,19 @@
+{
+  "name": "insurance/auto-claim",
+  "version": "0.1.0-draft",
+  "tier": "community",
+  "target_engine": ">=0.1 <1.0",
+  "inherits": ["insurance/base"],
+  "scope": {
+    "covers": ["报案受理", "单证与流程指引", "进度查询", "时效催办", "转人工判定"],
+    "excludes": ["定损", "核赔金额计算", "支付操作"]
+  },
+  "components": {
+    "regulatory_baseline": "rules/",
+    "domain_lexicon": "lexicon/",
+    "flow_templates": "flows/",
+    "eval_suite": "evals/",
+    "runtime_config": "runtime/"
+  },
+  "regulatory_review": { "verified_ratio": 0, "reviewed_by": "待指派" }
+}

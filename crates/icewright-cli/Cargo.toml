@@ -1,0 +1,17 @@
+[package]
+name = "icewright-cli"
+description = "IceWright command line — build industry customer-service systems like a wright"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "icewright"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+icewright-artifact = { path = "../icewright-artifact" }
+icewright-core = { path = "../icewright-core" }

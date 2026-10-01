@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "icewright://api-contract.schema.json",
+  "title": "ExternalApiContracts",
+  "description": "核心系统接口契约。生成系统不存业务数据，业务数据一律经此契约实时获取。凭证永不写入本文件，只引用 keyring。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "apis"],
+  "properties": {
+    "schema_version": { "const": "0.1.0" },
+    "apis": { "type": "array", "items": { "$ref": "#/$defs/api" } }
+  },
+  "$defs": {
+    "param": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "in", "type"],
+      "properties": {
+        "name": { "type": "string" },
+        "in": { "enum": ["path", "query", "header", "body"] },
+        "type": { "enum": ["string", "number", "bool", "date", "object"] },
+        "required": { "type": "boolean", "default": false },
+        "pii": { "enum": ["none", "masked", "secret"], "default": "none" }
+      }
+    },
+    "responseField": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "dict_field"],
+      "properties": {
+        "path": { "type": "string", "description": "JSONPath，如 $.data.status" },
+        "dict_field": { "type": "string", "description": "映射进数据字典的 FLD-* id" }
+      }
+    },
+    "fallback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action"],
+      "properties": {
+        "action": { "enum": ["script", "transfer_human", "retry_then_script"] },
+        "ref": { "type": "string" },
+        "escalation": { "enum": ["none", "optional", "required"], "default": "optional" }
+      }
+    },
+    "mockExample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "response"],
+      "properties": {
+        "label": { "type": "string", "description": "场景标签，评测用例按 label 选用" },
+        "status_code": { "type": "integer", "default": 200 },
+        "response": { "type": "object" }
+      }
+    },
+    "api": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "endpoint", "method", "response", "confirmed_by_customer"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^API-[A-Za-z0-9_-]+$" },
+        "purpose": { "type": "string" },
+        "endpoint": { "type": "string", "description": "含 {param} 占位，base_url 在 workspace 配置" },
+        "method": { "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+        "auth_ref": { "type": "string", "pattern": "^keyring://", "description": "仅 keyring 引用，禁止内联凭证" },
+        "auth_style": { "enum": ["none", "api_key_header", "bearer", "signature"], "default": "none" },
+        "params": { "type": "array", "items": { "$ref": "#/$defs/param" } },
+        "body_schema": { "type": "object" },
+        "response": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["fields"],
+          "properties": {
+            "fields": { "type": "array", "items": { "$ref": "#/$defs/responseField" }, "minItems": 1 }
+          }
+        },
+        "timeout_ms": { "type": "integer", "default": 3000 },
+        "retry": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max": { "type": "integer", "default": 2 },
+            "backoff": { "enum": ["none", "fixed", "exp"], "default": "exp" }
+          }
+        },
+        "fallback": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "失败也是规则，按错误类别声明",
+          "required": ["on_timeout"],
+          "properties": {
+            "on_timeout": { "$ref": "#/$defs/fallback" },
+            "on_4xx": { "$ref": "#/$defs/fallback" },
+            "on_5xx": { "$ref": "#/$defs/fallback" }
+          }
+        },
+        "sensitivity": { "type": "array", "items": { "type": "string" }, "description": "参数/响应字段脱敏等级引用" },
+        "mock_examples": { "type": "array", "items": { "$ref": "#/$defs/mockExample" }, "description": "至少 1 个成功场景；评测离线运行依赖此项" },
+        "confirmed_by_customer": { "type": "boolean", "default": false, "description": "闸门A：技术侧确认接口真实存在前不得进入 S5" }
+      }
+    }
+  }
+}

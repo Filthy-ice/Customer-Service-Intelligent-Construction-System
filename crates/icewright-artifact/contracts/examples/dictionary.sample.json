@@ -1,0 +1,36 @@
+{
+  "schema_version": "0.1.0",
+  "fields": [
+    {
+      "field": "FLD-claim_submitted_at",
+      "type": "datetime",
+      "source": { "kind": "api", "ref": "API-claim-progress" },
+      "pii": "none",
+      "description": "报案/请求提交时间"
+    },
+    {
+      "field": "FLD-claim_documents_complete",
+      "type": "bool",
+      "source": { "kind": "api", "ref": "API-claim-progress" }
+    },
+    {
+      "field": "FLD-accident_is_injury",
+      "type": "bool",
+      "source": { "kind": "session_slot", "ref": "F-report", "slot": "accident_is_injury" }
+    },
+    {
+      "field": "FLD-case_dispute_flag",
+      "type": "bool",
+      "source": { "kind": "api", "ref": "API-claim-progress" }
+    },
+    {
+      "field": "FLD-claim_overdue_days",
+      "type": "number",
+      "source": {
+        "kind": "derived",
+        "expr": "now() - FLD-claim_submitted_at",
+        "depends_on": ["FLD-claim_submitted_at"]
+      }
+    }
+  ]
+}

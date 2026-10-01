@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "icewright://pipeline-state.schema.json",
+  "title": "PipelineState",
+  "description": "可恢复状态机的持久化形态。阶段幂等键 = input_hash，相同输入重跑直接复用产物。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "workspace", "run_id", "current_stage", "stages"],
+  "properties": {
+    "schema_version": { "const": "0.1.0" },
+    "workspace": { "type": "string" },
+    "run_id": { "type": "string" },
+    "engine_version": { "type": "string" },
+    "pack_ref": { "type": "string", "description": "insurance/auto-claim@0.1.0" },
+    "current_stage": { "enum": ["S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8"] },
+    "updated_at": { "type": "string", "format": "date-time" },
+    "stages": {
+      "type": "array",
+      "minItems": 8,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/stage" }
+    }
+  },
+  "$defs": {
+    "stageId": { "enum": ["S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8"] },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["decision", "by", "at", "artifact_hash"],
+      "properties": {
+        "decision": { "enum": ["approved", "rejected", "partial_edit"] },
+        "by": { "type": "string", "description": "确认人（FR-F3 留痕）" },
+        "at": { "type": "string", "format": "date-time" },
+        "artifact_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "确认绑定的产物哈希——产物再变更则本确认自动失效" },
+        "note": { "type": "string" },
+        "role": { "enum": ["business_owner", "tech_reviewer"], "description": "experimental 栈强制 tech_reviewer（FR-H4）" }
+      }
+    },
+    "stage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "status"],
+      "properties": {
+        "id": { "$ref": "#/$defs/stageId" },
+        "status": { "enum": ["pending", "running", "waiting_gate", "approved", "failed", "blocked_preflight", "skipped"] },
+        "input_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "幂等键：上游产物+配置+引擎版本摘要" },
+        "output_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "started_at": { "type": "string", "format": "date-time" },
+        "ended_at": { "type": "string", "format": "date-time" },
+        "attempts": { "type": "integer", "minimum": 0, "default": 0 },
+        "gate": { "$ref": "#/$defs/gate" },
+        "failures": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind"],
+            "properties": {
+              "kind": { "enum": ["schema_invalid", "dangling_ref", "eval_failed", "compile_failed", "test_failed", "probe_below_threshold"] },
+              "detail": { "type": "string" },
+              "located_refs": { "type": "array", "items": { "type": "string" }, "description": "失败定位到 R-*/SK-*/TC-* 粒度（FR-H2）" }
+            }
+          }
+        },
+        "usage": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "FR-C4 计量",
+          "properties": {
+            "tokens_in": { "type": "integer" },
+            "tokens_out": { "type": "integer" },
+            "cost_estimate": { "type": "number" },
+            "model": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}

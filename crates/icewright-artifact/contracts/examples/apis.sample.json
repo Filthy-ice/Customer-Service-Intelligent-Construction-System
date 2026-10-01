@@ -1,0 +1,40 @@
+{
+  "schema_version": "0.1.0",
+  "apis": [
+    {
+      "id": "API-claim-progress",
+      "purpose": "理赔进度与时效查询",
+      "endpoint": "/claim/{caseNo}/progress",
+      "method": "GET",
+      "auth_ref": "keyring://ws/auto-claim/core-api",
+      "auth_style": "api_key_header",
+      "params": [{ "name": "caseNo", "in": "path", "type": "string", "required": true, "pii": "masked" }],
+      "response": {
+        "fields": [
+          { "path": "$.status", "dict_field": "FLD-claim_status" },
+          { "path": "$.documentsComplete", "dict_field": "FLD-claim_documents_complete" },
+          { "path": "$.dispute", "dict_field": "FLD-case_dispute_flag" },
+          { "path": "$.submittedAt", "dict_field": "FLD-claim_submitted_at" }
+        ]
+      },
+      "timeout_ms": 3000,
+      "retry": { "max": 2, "backoff": "exp" },
+      "fallback": {
+        "on_timeout": { "action": "script", "ref": "S-progress-unavailable", "escalation": "optional" },
+        "on_4xx": { "action": "transfer_human" }
+      },
+      "sensitivity": ["caseNo"],
+      "mock_examples": [
+        {
+          "label": "in-assessment",
+          "response": { "status": "核定中", "documentsComplete": true, "dispute": false, "submittedAt": "2026-09-20T10:00:00+08:00" }
+        },
+        {
+          "label": "adversarial-overdue",
+          "response": { "status": "核定中", "documentsComplete": true, "dispute": false, "submittedAt": "2026-08-01T10:00:00+08:00" }
+        }
+      ],
+      "confirmed_by_customer": false
+    }
+  ]
+}

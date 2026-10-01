@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "icewright://flows.schema.json",
+  "title": "ConversationFlow",
+  "description": "对话流程 DSL。转移条件中的字段必须存在于数据字典；动作/转移应 rule_ref 回填规则 id。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "flows"],
+  "properties": {
+    "schema_version": { "const": "0.1.0" },
+    "flows": { "type": "array", "items": { "$ref": "#/$defs/flow" } }
+  },
+  "$defs": {
+    "slot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "type"],
+      "properties": {
+        "name": { "type": "string" },
+        "type": { "enum": ["string", "text", "number", "datetime", "date", "bool", "enum", "phone", "id_card"] },
+        "enum_values": { "type": "array", "items": { "type": "string" } },
+        "required": { "type": "boolean", "default": false },
+        "branch_trigger": { "type": "boolean", "default": false, "description": "该槽位取值直接决定转移" },
+        "pii": { "enum": ["none", "masked", "secret"], "default": "none" },
+        "collect_script": { "type": "string", "description": "S-* 话术：如何向用户询问该槽位" },
+        "max_retries": { "type": "integer", "minimum": 0, "default": 2 }
+      }
+    },
+    "transition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["on", "to"],
+      "properties": {
+        "on": { "type": "string", "description": "条件表达式：字典字段/槽位，或保留字 slots_complete(F-*)" },
+        "to": { "type": "string", "description": "目标状态 id" },
+        "rule_ref": { "type": "string", "description": "R-* 回填：该转移由哪条规则驱动" }
+      }
+    },
+    "stateAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["script", "skill_call", "collect", "takeover", "set_slot", "notify"] },
+        "ref": { "type": "string", "description": "S-*/SK-*/槽位名" },
+        "rule_ref": { "type": "string" }
+      }
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "enum": ["normal", "terminal", "terminal_takeover"], "default": "normal" },
+        "intent_entry": { "type": "array", "items": { "type": "string" }, "description": "进入该流程的意图标签（lexicon 引用）" },
+        "actions": { "type": "array", "items": { "$ref": "#/$defs/stateAction" } },
+        "transitions": { "type": "array", "items": { "$ref": "#/$defs/transition" } }
+      }
+    },
+    "flow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["flow", "slots", "states"],
+      "properties": {
+        "flow": { "type": "string", "pattern": "^F-[A-Za-z0-9_-]+$" },
+        "description": { "type": "string" },
+        "slots": { "type": "array", "items": { "$ref": "#/$defs/slot" } },
+        "entry": { "type": "string", "description": "入口状态 id，缺省为 states[0]" },
+        "states": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/state" } }
+      }
+    }
+  }
+}

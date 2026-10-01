@@ -1,0 +1,57 @@
+{
+  "schema_version": "0.1.0",
+  "workspace": "auto-claim",
+  "run_id": "run-20261001-0007",
+  "engine_version": "0.1.0",
+  "pack_ref": "insurance/auto-claim@0.1.0-draft",
+  "current_stage": "S4",
+  "updated_at": "2026-10-01T15:30:00+08:00",
+  "stages": [
+    {
+      "id": "S1",
+      "status": "approved",
+      "input_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "output_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "started_at": "2026-10-01T14:00:00+08:00",
+      "ended_at": "2026-10-01T14:12:00+08:00",
+      "attempts": 1
+    },
+    {
+      "id": "S2",
+      "status": "approved",
+      "input_hash": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "output_hash": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+      "attempts": 1,
+      "usage": { "model": "probe:qwen-72b", "tokens_in": 4200, "tokens_out": 1100, "cost_estimate": 0.0 }
+    },
+    {
+      "id": "S3",
+      "status": "approved",
+      "input_hash": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+      "output_hash": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+      "attempts": 2,
+      "failures": [
+        { "kind": "dangling_ref", "detail": "规则条件引用了字典外字段", "located_refs": ["R-AUTO-0007"] }
+      ],
+      "usage": { "model": "claude-sonnet-4.5", "tokens_in": 512000, "tokens_out": 38000, "cost_estimate": 4.2 }
+    },
+    {
+      "id": "S4",
+      "status": "waiting_gate",
+      "input_hash": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+      "attempts": 1,
+      "gate": {
+        "decision": "rejected",
+        "by": "zhanghaobing",
+        "at": "2026-10-01T15:10:00+08:00",
+        "artifact_hash": "sha256:8888888888888888888888888888888888888888888888888888888888888888",
+        "note": "R-AUTO-0004 告知项缺自助查询渠道，已回 S3 修正后重渲染",
+        "role": "business_owner"
+      }
+    },
+    { "id": "S5", "status": "pending" },
+    { "id": "S6", "status": "pending" },
+    { "id": "S7", "status": "pending" },
+    { "id": "S8", "status": "pending" }
+  ]
+}
