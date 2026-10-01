@@ -13,7 +13,7 @@ pub const CUSTOM_MARKER: &str = "ICEWRIGHT-CUSTOM";
 const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// 目标栈为 python 时的骨架模板（目录结构遵循 docs-internal/12 的阿里 Python 分层）。
-static TEMPLATES: &[(&str, &str)] = &[
+static TEMPLATES_PY: &[(&str, &str)] = &[
     (
         "requirements.txt",
         include_str!("../templates/python/requirements.txt"),
@@ -106,10 +106,124 @@ static TEMPLATES: &[(&str, &str)] = &[
     ),
 ];
 
+/// 目标栈为 java 时的骨架模板（Spring Boot 3 / JDK21，嵩山版分层：api/service/domain/integration/config）。
+static TEMPLATES_JAVA: &[(&str, &str)] = &[
+    ("pom.xml", include_str!("../templates/java/pom.xml")),
+    ("README.md", include_str!("../templates/java/README.md")),
+    (
+        ".env.example",
+        include_str!("../templates/java/.env.example"),
+    ),
+    (".gitignore", include_str!("../templates/java/.gitignore")),
+    (
+        "src/main/resources/application.yml",
+        include_str!("../templates/java/src/main/resources/application.yml"),
+    ),
+    (
+        "src/main/resources/static/index.html",
+        include_str!("../templates/java/src/main/resources/static/index.html"),
+    ),
+    (
+        "src/main/java/com/icewright/generated/IcewrightApplication.java",
+        include_str!("../templates/java/src/main/java/com/icewright/generated/IcewrightApplication.java"),
+    ),
+    (
+        "src/main/java/com/icewright/generated/config/Settings.java",
+        include_str!("../templates/java/src/main/java/com/icewright/generated/config/Settings.java"),
+    ),
+    (
+        "src/main/java/com/icewright/generated/api/ChatController.java",
+        include_str!("../templates/java/src/main/java/com/icewright/generated/api/ChatController.java"),
+    ),
+    (
+        "src/main/java/com/icewright/generated/api/HealthController.java",
+        include_str!("../templates/java/src/main/java/com/icewright/generated/api/HealthController.java"),
+    ),
+    (
+        "src/main/java/com/icewright/generated/api/dto/ChatRequest.java",
+        include_str!("../templates/java/src/main/java/com/icewright/generated/api/dto/ChatRequest.java"),
+    ),
+    (
+        "src/main/java/com/icewright/generated/api/dto/ChatResponse.java",
+        include_str!("../templates/java/src/main/java/com/icewright/generated/api/dto/ChatResponse.java"),
+    ),
+    (
+        "src/main/java/com/icewright/generated/api/dto/HealthResponse.java",
+        include_str!("../templates/java/src/main/java/com/icewright/generated/api/dto/HealthResponse.java"),
+    ),
+    (
+        "src/main/java/com/icewright/generated/service/SessionService.java",
+        include_str!("../templates/java/src/main/java/com/icewright/generated/service/SessionService.java"),
+    ),
+    (
+        "src/main/java/com/icewright/generated/service/ChatService.java",
+        include_str!("../templates/java/src/main/java/com/icewright/generated/service/ChatService.java"),
+    ),
+    (
+        "src/main/java/com/icewright/generated/domain/RulesEngine.java",
+        include_str!("../templates/java/src/main/java/com/icewright/generated/domain/RulesEngine.java"),
+    ),
+    (
+        "src/main/java/com/icewright/generated/domain/SkillsRegistry.java",
+        include_str!("../templates/java/src/main/java/com/icewright/generated/domain/SkillsRegistry.java"),
+    ),
+    (
+        "src/main/java/com/icewright/generated/domain/I18n.java",
+        include_str!("../templates/java/src/main/java/com/icewright/generated/domain/I18n.java"),
+    ),
+    (
+        "src/main/java/com/icewright/generated/integration/CoreClient.java",
+        include_str!("../templates/java/src/main/java/com/icewright/generated/integration/CoreClient.java"),
+    ),
+    (
+        "src/test/java/com/icewright/generated/domain/RulesEngineTest.java",
+        include_str!("../templates/java/src/test/java/com/icewright/generated/domain/RulesEngineTest.java"),
+    ),
+    (
+        "src/test/java/com/icewright/generated/domain/SkillsRegistryTest.java",
+        include_str!("../templates/java/src/test/java/com/icewright/generated/domain/SkillsRegistryTest.java"),
+    ),
+    (
+        "src/test/java/com/icewright/generated/domain/I18nTest.java",
+        include_str!("../templates/java/src/test/java/com/icewright/generated/domain/I18nTest.java"),
+    ),
+];
+
+/// 栈 → (模板表, 规则/技能数据嵌入目录)。go 适配器在路线图上，尚未实现。
+fn stack_layout(stack: &str) -> Option<(&'static [(&'static str, &'static str)], &'static str)> {
+    match stack {
+        "python" => Some((TEMPLATES_PY, "app/data")),
+        "java" => Some((TEMPLATES_JAVA, "src/main/resources/data")),
+        _ => None,
+    }
+}
+
+/// Maven artifactId：小写、非 [a-z0-9-] 一律转 '-'，压缩连续 '-'；空则回退。
+fn sanitize_artifact_id(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut prev_dash = false;
+    for ch in raw.to_lowercase().chars() {
+        if ch.is_ascii_lowercase() || ch.is_ascii_digit() {
+            out.push(ch);
+            prev_dash = false;
+        } else if !prev_dash {
+            out.push('-');
+            prev_dash = true;
+        }
+    }
+    let out = out.trim_matches('-').to_string();
+    if out.is_empty() {
+        "icewright-app".to_string()
+    } else {
+        out
+    }
+}
+
 struct Slots {
     project_name: String,
     pack_ref: String,
     engine_version: String,
+    artifact_id: String,
 }
 
 /// 渲染槽位；若仍残留 `{{`，说明模板/槽位表不同步——宁可失败不可写出半截占位符。
@@ -117,7 +231,8 @@ fn render(tpl: &str, rel: &str, slots: &Slots) -> Result<String> {
     let out = tpl
         .replace("{{project_name}}", &slots.project_name)
         .replace("{{pack_ref}}", &slots.pack_ref)
-        .replace("{{engine_version}}", &slots.engine_version);
+        .replace("{{engine_version}}", &slots.engine_version)
+        .replace("{{artifact_id}}", &slots.artifact_id);
     if let Some(pos) = out.find("{{") {
         let around = &out[pos..out.len().min(pos + 40)];
         bail!("模板 {rel} 含未定义槽位: {around:?}");
@@ -138,7 +253,7 @@ fn has_custom_marker(path: &Path) -> bool {
         .map(|raw| {
             raw.lines()
                 .take(3)
-                .any(|l| l.contains(CUSTOM_MARKER) && !l.contains("# AUTO-GENERATED BY IceWright"))
+                .any(|l| l.contains(CUSTOM_MARKER) && !l.contains("AUTO-GENERATED BY IceWright"))
         })
         .unwrap_or(false)
 }
@@ -185,12 +300,12 @@ pub fn generate(ws: &Workspace, out_dir: &Path) -> Result<GenerateReport> {
 
     let cfg = ws.config()?;
     // 生成适配器按栈分目标实现；未实现的栈必须拒绝，绝不把 python 骨架冒充 java/go 交付。
-    if cfg.workspace.stack != "python" {
+    let Some((templates, data_rel)) = stack_layout(&cfg.workspace.stack) else {
         bail!(
-            "S5 生成暂只支持 stack=python；stack={:?} 的适配器在路线图上，尚未实现，拒绝输出错栈项目",
+            "S5 生成暂只支持 stack=python|java；stack={:?} 的适配器在路线图上，尚未实现，拒绝输出错栈项目",
             cfg.workspace.stack
         );
-    }
+    };
     // 契约硬闸：技能须逐条人工确认（模型一律输出 pending），未确认技能不进运行时
     let skills_path = ws.artifact_path(crate::extract::SKILLS_ARTIFACT);
     let skills_raw = if skills_path.exists() {
@@ -230,6 +345,7 @@ pub fn generate(ws: &Workspace, out_dir: &Path) -> Result<GenerateReport> {
         .or(cfg_pack)
         .unwrap_or_else(|| "pack/unspecified".to_string());
     let slots = Slots {
+        artifact_id: sanitize_artifact_id(&cfg.workspace.name),
         project_name: cfg.workspace.name.clone(),
         pack_ref,
         engine_version: ENGINE_VERSION.to_string(),
@@ -238,7 +354,7 @@ pub fn generate(ws: &Workspace, out_dir: &Path) -> Result<GenerateReport> {
     let mut written = Vec::new();
     let mut preserved = Vec::new();
     let mut hashed: Vec<String> = Vec::new();
-    for (rel, tpl) in TEMPLATES {
+    for (rel, tpl) in templates {
         let target = out_dir.join(rel);
         if target.exists() && has_custom_marker(&target) {
             preserved.push(rel.to_string());
@@ -257,12 +373,12 @@ pub fn generate(ws: &Workspace, out_dir: &Path) -> Result<GenerateReport> {
     }
 
     // 规则产物编译进项目（数据不是模板，重生成始终覆盖）
-    hashed.push(format!("app/data/rules.json\n{rules_raw}"));
-    let data_dir = out_dir.join("app/data");
+    hashed.push(format!("{data_rel}/rules.json\n{rules_raw}"));
+    let data_dir = out_dir.join(data_rel);
     std::fs::create_dir_all(&data_dir)?;
     std::fs::write(data_dir.join("rules.json"), &rules_raw)?;
     if let Some(raw) = &skills_raw {
-        hashed.push(format!("app/data/skills.json\n{raw}"));
+        hashed.push(format!("{data_rel}/skills.json\n{raw}"));
         std::fs::write(data_dir.join("skills.json"), raw)?;
     }
 
@@ -270,7 +386,7 @@ pub fn generate(ws: &Workspace, out_dir: &Path) -> Result<GenerateReport> {
     let output_hash = state::sha256_hex(hashed.join("\n---\n").as_bytes());
 
     let cfg_raw = std::fs::read(ws.root.join("icewright.toml"))?;
-    let template_bytes: Vec<&[u8]> = TEMPLATES.iter().map(|(_, t)| t.as_bytes()).collect();
+    let template_bytes: Vec<&[u8]> = templates.iter().map(|(_, t)| t.as_bytes()).collect();
     let mut input_parts: Vec<&[u8]> = vec![rules_raw.as_bytes(), &cfg_raw];
     if let Some(raw) = &skills_raw {
         input_parts.push(raw.as_bytes());
@@ -379,7 +495,7 @@ mod tests {
         let out = ws.root.join("output");
         let report = generate(&ws, &out).unwrap();
         assert!(report.preserved.is_empty());
-        assert_eq!(report.written.len(), TEMPLATES.len());
+        assert_eq!(report.written.len(), TEMPLATES_PY.len());
         let main_py = std::fs::read_to_string(out.join("app/main.py")).unwrap();
         assert!(main_py.contains(&ws.id), "project_name 槽位应渲染");
         assert!(!main_py.contains("{{"));
@@ -490,17 +606,69 @@ mod tests {
 
     #[test]
     fn unimplemented_stack_is_rejected() {
-        let ws = setup("stackjava");
+        let ws = setup("stackgo");
         let cfg_path = ws.root.join("icewright.toml");
         let raw = std::fs::read_to_string(&cfg_path)
             .unwrap()
-            .replace("stack = \"python\"", "stack = \"java\"");
+            .replace("stack = \"python\"", "stack = \"go\"");
         std::fs::write(&cfg_path, raw).unwrap();
         let err = generate(&ws, &ws.root.join("output")).unwrap_err();
-        assert!(err.to_string().contains("java"), "{err}");
+        assert!(err.to_string().contains("go"), "{err}");
         assert!(
             !ws.root.join("output").join("app/main.py").exists(),
             "拒绝时不得写出错栈项目"
         );
+    }
+
+    #[test]
+    fn java_stack_renders_maven_tree() {
+        let ws = setup("stackjavatree");
+        let cfg_path = ws.root.join("icewright.toml");
+        let raw: String = std::fs::read_to_string(&cfg_path)
+            .unwrap()
+            .lines()
+            .map(|l| match l {
+                l if l.starts_with("name = ") => "name = \"车险理赔\"",
+                l if l.starts_with("stack = ") => "stack = \"java\"",
+                other => other,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(&cfg_path, raw).unwrap();
+        let out = ws.root.join("output");
+        let report = generate(&ws, &out).unwrap();
+        assert_eq!(report.written.len(), TEMPLATES_JAVA.len());
+        assert!(
+            !out.join("app/main.py").exists(),
+            "java 栈不得写出 python 骨架"
+        );
+
+        let pom = std::fs::read_to_string(out.join("pom.xml")).unwrap();
+        assert!(
+            pom.contains("<artifactId>icewright-app</artifactId>"),
+            "中文项目名应回退安全 artifactId"
+        );
+        assert!(!pom.contains("{{"), "pom 槽位应全部渲染");
+        assert!(out
+            .join("src/main/java/com/icewright/generated/IcewrightApplication.java")
+            .exists());
+        assert!(out.join("src/main/resources/static/index.html").exists());
+        assert!(
+            out.join("src/main/resources/data/rules.json").exists(),
+            "java 栈规则嵌入 classpath data 目录"
+        );
+
+        // 幂等：再次生成，产物哈希不变（HTML/XML 注释头不得被误判为定制层）
+        let report2 = generate(&ws, &out).unwrap();
+        assert!(report2.preserved.is_empty(), "{:?}", report2.preserved);
+        assert_eq!(report.output_hash, report2.output_hash);
+    }
+
+    #[test]
+    fn artifact_id_sanitizes_slug() {
+        assert_eq!(sanitize_artifact_id("My Claim System"), "my-claim-system");
+        assert_eq!(sanitize_artifact_id("auto--claim.v2"), "auto-claim-v2");
+        assert_eq!(sanitize_artifact_id("车险理赔"), "icewright-app");
+        assert_eq!(sanitize_artifact_id("-ab_ cd-"), "ab-cd");
     }
 }

@@ -6,7 +6,7 @@ pub const DEFAULT_CONFIG_TOML: &str = r#"# IceWright workspace 配置（生成�
 [workspace]
 name = "{name}"
 pack = ""          # 行业包引用，如 insurance/auto-claim@0.1.0
-stack = "python"   # python | java | go(experimental)
+stack = "python"   # python | java（go 在路线图上，未实现前 S5 显式拒绝）
 locale = "zh"      # CLI 文案语言：zh | en（临时覆盖用环境变量 ICERIGHT_LOCALE）
 
 [model]

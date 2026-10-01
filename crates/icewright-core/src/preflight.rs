@@ -132,6 +132,8 @@ pub fn run(ws: &Workspace, secrets_root: &Path) -> Result<Vec<Check>> {
         ),
     ));
 
+    checks.push(toolchain_check(&cfg.workspace.stack));
+
     checks.push(Check::new(
         "pack",
         !cfg.workspace.pack.trim().is_empty(),
@@ -145,6 +147,42 @@ pub fn run(ws: &Workspace, secrets_root: &Path) -> Result<Vec<Check>> {
     checks.extend(datasource_checks(&cfg, secrets_root, timeout));
 
     Ok(checks)
+}
+
+/// 构建工具链探测：S6 验证要用栈对应编译器，缺了会在 S6 才暴露，不如在 S2 拦住。
+fn toolchain_check(stack: &str) -> Check {
+    let program: std::path::PathBuf = match stack {
+        "python" => crate::verify::default_python(),
+        "java" => crate::verify::default_maven(),
+        "go" => std::path::PathBuf::from("go"),
+        other => return Check::new("toolchain", false, format!("stack={other:?} 无已知工具链")),
+    };
+    let arg = match stack {
+        "java" => "-version",
+        "go" => "version",
+        _ => "--version",
+    };
+    match std::process::Command::new(&program).arg(arg).output() {
+        Ok(out) if out.status.success() => {
+            let first = String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .chain(String::from_utf8_lossy(&out.stderr).lines())
+                .find(|l| !l.trim().is_empty())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            Check::new("toolchain", true, format!("{program:?} → {first}"))
+        }
+        Ok(out) => Check::new(
+            "toolchain",
+            false,
+            format!(
+                "{program:?} {arg} 退出码 {:?}，S6 验证将不可用",
+                out.status.code()
+            ),
+        ),
+        Err(e) => Check::new("toolchain", false, format!("找不到 {program:?}: {e}")),
+    }
 }
 
 /// Redis/MySQL 协议级探测；未配置 host 则非阻塞跳过。

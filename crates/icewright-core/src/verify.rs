@@ -19,7 +19,7 @@ impl Check {
     }
 }
 
-const REQUIRED_FILES: [&str; 6] = [
+const REQUIRED_FILES_PY: [&str; 6] = [
     "requirements.txt",
     "app/main.py",
     "app/data/rules.json",
@@ -28,8 +28,24 @@ const REQUIRED_FILES: [&str; 6] = [
     "static/chat.html",
 ];
 
-fn run_cmd(python: &Path, args: &[&str], cwd: &Path) -> (bool, String) {
-    match Command::new(python).args(args).current_dir(cwd).output() {
+const REQUIRED_FILES_JAVA: [&str; 6] = [
+    "pom.xml",
+    "src/main/java/com/icewright/generated/IcewrightApplication.java",
+    "src/main/resources/data/rules.json",
+    "src/test/java/com/icewright/generated/domain/RulesEngineTest.java",
+    "src/main/java/com/icewright/generated/domain/I18n.java",
+    "src/main/resources/static/index.html",
+];
+
+fn required_files(stack: &str) -> &'static [&'static str] {
+    match stack {
+        "java" => REQUIRED_FILES_JAVA.as_slice(),
+        _ => REQUIRED_FILES_PY.as_slice(),
+    }
+}
+
+fn run_cmd(program: &Path, args: &[&str], cwd: &Path) -> (bool, String) {
+    match Command::new(program).args(args).current_dir(cwd).output() {
         Ok(out) => {
             let mut text = String::from_utf8_lossy(&out.stdout).to_string();
             let err = String::from_utf8_lossy(&out.stderr).to_string();
@@ -47,7 +63,7 @@ fn run_cmd(python: &Path, args: &[&str], cwd: &Path) -> (bool, String) {
                 .collect();
             (out.status.success(), trimmed)
         }
-        Err(e) => (false, format!("无法执行 {python:?}: {e}")),
+        Err(e) => (false, format!("无法执行 {program:?}: {e}")),
     }
 }
 
@@ -64,7 +80,9 @@ pub fn verify(ws: &Workspace, out_dir: &Path, python: &Path) -> Result<Vec<Check
 
     let mut checks = Vec::new();
 
-    let missing: Vec<&str> = REQUIRED_FILES
+    let stack = ws.config()?.workspace.stack;
+    let layout = required_files(&stack);
+    let missing: Vec<&str> = layout
         .iter()
         .filter(|f| !out_dir.join(f).exists())
         .copied()
@@ -73,21 +91,36 @@ pub fn verify(ws: &Workspace, out_dir: &Path, python: &Path) -> Result<Vec<Check
         "layout",
         missing.is_empty(),
         if missing.is_empty() {
-            format!("{} 必备文件齐全", out_dir.display())
+            format!("{} 必备文件齐全（stack={stack}）", out_dir.display())
         } else {
             format!("缺少: {}", missing.join(", "))
         },
     ));
 
+    // 编译与测试命令按栈分派：python 用解释器自检，java 走 Maven
+    let (program, compile_args, test_args): (PathBuf, Vec<&str>, Vec<&str>) = if stack == "java" {
+        (
+            default_maven(),
+            vec!["-q", "-DskipTests", "compile"],
+            vec!["-q", "test"],
+        )
+    } else {
+        (
+            python.to_path_buf(),
+            vec!["-m", "compileall", "-q", "app", "tests"],
+            vec!["-m", "pytest", "-q", "tests"],
+        )
+    };
+
     let (compile_ok, compile_tail) = if missing.is_empty() {
-        run_cmd(python, &["-m", "compileall", "-q", "app", "tests"], out_dir)
+        run_cmd(&program, &compile_args, out_dir)
     } else {
         (false, "工程不完整，跳过编译".to_string())
     };
     checks.push(Check::new("compile", compile_ok, compile_tail));
 
     let (test_ok, test_tail) = if compile_ok {
-        run_cmd(python, &["-m", "pytest", "-q", "tests"], out_dir)
+        run_cmd(&program, &test_args, out_dir)
     } else {
         (false, "编译未通过，跳过测试".to_string())
     };
@@ -149,6 +182,12 @@ pub fn default_python() -> PathBuf {
     std::env::var("IW_PYTHON")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("python3"))
+}
+
+pub fn default_maven() -> PathBuf {
+    std::env::var("IW_MAVEN")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("mvn"))
 }
 
 #[cfg(test)]
@@ -248,6 +287,40 @@ mod tests {
                 assert_eq!(s6.failures[0].kind, "test_failed");
             }
             other => panic!("unexpected status {other:?}"),
+        }
+    }
+
+    #[test]
+    fn java_stack_verify_routes_to_maven_if_available() {
+        // 需要 JDK21+Maven；缺工具链时跳过实质断言
+        let maven = default_maven();
+        if Command::new(&maven).arg("-version").output().is_err() {
+            return;
+        }
+        let (ws, out) = prepared("javamvn");
+        let cfg_path = ws.root.join("icewright.toml");
+        let raw = std::fs::read_to_string(&cfg_path)
+            .unwrap()
+            .replace("stack = \"python\"", "stack = \"java\"");
+        std::fs::write(&cfg_path, raw).unwrap();
+        generate::generate(&ws, &out).unwrap();
+        let checks = verify(&ws, &out, Path::new("python3")).unwrap();
+        let layout = checks.iter().find(|c| c.name == "layout").unwrap();
+        assert!(layout.ok, "java 布局应齐全: {}", layout.detail);
+
+        let st = state::load_state(&ws.state_path()).unwrap();
+        let s6 = st.stage(StageId::S6).unwrap();
+        let compile_ok = checks.iter().find(|c| c.name == "compile").unwrap().ok;
+        if compile_ok {
+            match s6.status {
+                StageStatus::Approved => assert_eq!(st.current_stage, StageId::S7),
+                StageStatus::Failed => assert_eq!(s6.failures[0].kind, "test_failed"),
+                other => panic!("unexpected status {other:?}"),
+            }
+        } else {
+            // mvn 不可用/依赖下载受阻：按契约记 compile_failed，不推进阶段
+            assert_eq!(s6.status, StageStatus::Failed);
+            assert_eq!(s6.failures[0].kind, "compile_failed");
         }
     }
 }
