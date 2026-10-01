@@ -1,0 +1,36 @@
+name: gate
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: fmt check
+        run: cargo fmt --all --check
+      - name: clippy (deny warnings)
+        run: cargo clippy --all-targets -- -D warnings
+      - name: tests
+        run: cargo test --workspace
+
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: ajv recheck (dual channel)
+        working-directory: crates/icewright-artifact/contracts
+        run: |
+          npm ci
+          npm test
