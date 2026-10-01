@@ -56,7 +56,7 @@
             "additionalProperties": false,
             "required": ["kind"],
             "properties": {
-              "kind": { "enum": ["schema_invalid", "dangling_ref", "eval_failed", "compile_failed", "test_failed", "probe_below_threshold"] },
+              "kind": { "enum": ["schema_invalid", "dangling_ref", "eval_failed", "compile_failed", "test_failed", "probe_below_threshold", "preflight_failed"] },
               "detail": { "type": "string" },
               "located_refs": { "type": "array", "items": { "type": "string" }, "description": "失败定位到 R-*/SK-*/TC-* 粒度（FR-H2）" }
             }

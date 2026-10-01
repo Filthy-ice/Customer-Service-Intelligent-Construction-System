@@ -1,0 +1,15 @@
+{
+  "name": "icewright-contracts-recheck",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Independent ajv recheck channel for the embedded JSON Schema contracts",
+  "type": "commonjs",
+  "scripts": {
+    "test": "node validate.js"
+  },
+  "license": "Apache-2.0",
+  "dependencies": {
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1"
+  }
+}

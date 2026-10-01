@@ -52,6 +52,8 @@ enum WsAction {
 enum PipelineAction {
     /// 初始化 pipeline（写入 pipeline/state.json；已存在则拒绝）
     Init { ws: String },
+    /// S2 环境预检（语料/模型端点/密钥/stack/行业包），结论写回状态
+    Preflight { ws: String },
     /// 打印某 workspace 的 pipeline 状态表
     Status { ws: String },
 }
@@ -166,6 +168,29 @@ fn cmd_secret_set(r#ref: &str) -> Result<()> {
     Ok(())
 }
 
+fn cmd_pipeline_preflight(ws_id: &str) -> Result<()> {
+    let ws = Workspace::open(ws_id)?;
+    if !ws.state_path().exists() {
+        anyhow::bail!("请先 `icewright pipeline init {ws_id}`");
+    }
+    let sroot = secrets::secrets_root()?;
+    let (checks, all_ok) = icewright_core::preflight::run_and_record(&ws, &sroot)?;
+    for c in &checks {
+        println!(
+            "  {}  {:<15} {}",
+            if c.ok { "PASS" } else { "FAIL" },
+            c.name,
+            c.detail
+        );
+    }
+    if all_ok {
+        println!("预检通过：可进入 S3 领域规则提取");
+        Ok(())
+    } else {
+        anyhow::bail!("预检未通过（状态已记为 blocked_preflight），修复 FAIL 项后重跑")
+    }
+}
+
 fn cmd_pipeline_status(ws_id: &str) -> Result<()> {
     let ws = Workspace::open(ws_id)?;
     let path = ws.state_path();
@@ -229,6 +254,7 @@ fn main() -> Result<()> {
         },
         Cmd::Pipeline { action } => match action {
             PipelineAction::Init { ws } => cmd_pipeline_init(ws),
+            PipelineAction::Preflight { ws } => cmd_pipeline_preflight(ws),
             PipelineAction::Status { ws } => cmd_pipeline_status(ws),
         },
         Cmd::Config { action } => match action {
