@@ -54,6 +54,11 @@ enum Cmd {
         #[arg(long)]
         python: Option<String>,
     },
+    /// S7 交付报告渲染与闸门B 验收确认
+    Delivery {
+        #[command(subcommand)]
+        action: DeliveryAction,
+    },
     /// 模型接入探测（最小补全请求验证端点/密钥/模型三件套）
     Model {
         #[command(subcommand)]
@@ -121,6 +126,34 @@ enum DesignAction {
         role: Option<String>,
     },
     /// 闸门A：驳回（必须附注）
+    Reject {
+        ws: String,
+        #[arg(long)]
+        by: String,
+        #[arg(long)]
+        note: String,
+        #[arg(long)]
+        role: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum DeliveryAction {
+    /// 渲染交付报告并进入 waiting_gate（产物变更会作废既往确认）
+    Render { ws: String },
+    /// 打印交付报告
+    Show { ws: String },
+    /// 闸门B：批准交付（绑定当前报告哈希）
+    Approve {
+        ws: String,
+        #[arg(long)]
+        by: String,
+        #[arg(long)]
+        note: Option<String>,
+        #[arg(long)]
+        role: Option<String>,
+    },
+    /// 闸门B：驳回（必须附注）
     Reject {
         ws: String,
         #[arg(long)]
@@ -466,6 +499,54 @@ fn cmd_verify(ws_id: &str, out: Option<&str>, python: Option<&str>) -> Result<()
     }
 }
 
+fn cmd_delivery(action: &DeliveryAction) -> Result<()> {
+    use icewright_core::delivery;
+    match action {
+        DeliveryAction::Render { ws } => {
+            let ws = Workspace::open(ws)?;
+            let (path, changed) = delivery::publish(&ws)?;
+            println!("交付报告已渲染: {path}");
+            if changed {
+                println!("内容较上次有变化：既往闸门B 确认已作废，需重新确认");
+            }
+            println!("审阅后执行 `icewright delivery approve|reject {}`", ws.id);
+        }
+        DeliveryAction::Show { ws } => {
+            let ws = Workspace::open(ws)?;
+            let p = ws.artifact_path(delivery::DELIVERY_DOC);
+            print!(
+                "{}",
+                std::fs::read_to_string(&p)
+                    .unwrap_or_else(|_| format!("尚未渲染: {}", p.display()))
+            );
+        }
+        DeliveryAction::Approve { ws, by, note, role } => {
+            let ws = Workspace::open(ws)?;
+            delivery::decide(
+                &ws,
+                state::GateDecision::Approved,
+                by,
+                parse_role(role.as_deref())?,
+                note.as_deref(),
+            )?;
+            println!("闸门B 已批准：交付生效，进入 S8 变更/重生成态");
+        }
+        DeliveryAction::Reject { ws, by, note, role } => {
+            let ws = Workspace::open(ws)?;
+            delivery::decide(
+                &ws,
+                state::GateDecision::Rejected,
+                by,
+                parse_role(role.as_deref())?,
+                Some(note),
+            )?;
+            println!("闸门B 已驳回：{note}");
+            println!("修订后重新 `icewright delivery render {}`", ws.id);
+        }
+    }
+    Ok(())
+}
+
 fn cmd_contract_check() -> Result<()> {
     let reports = icewright_artifact::selftest()?;
     let mut failed = 0;
@@ -510,6 +591,7 @@ fn main() -> Result<()> {
         Cmd::Design { action } => cmd_design(action),
         Cmd::Generate { ws, out } => cmd_generate(ws, out.as_deref()),
         Cmd::Verify { ws, out, python } => cmd_verify(ws, out.as_deref(), python.as_deref()),
+        Cmd::Delivery { action } => cmd_delivery(action),
         Cmd::Model { action } => match action {
             ModelAction::Probe { ws } => cmd_model_probe(ws),
         },
