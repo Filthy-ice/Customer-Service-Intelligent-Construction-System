@@ -49,6 +49,11 @@ fn rules_stats(ws: &Workspace) -> (usize, BTreeMap<String, usize>, BTreeMap<Stri
     (total, by_type, by_point)
 }
 
+fn read_eval(ws: &Workspace) -> Option<Value> {
+    let raw = std::fs::read_to_string(ws.artifact_path(crate::evaluate::EVAL_RESULT)).ok()?;
+    serde_json::from_str(&raw).ok()
+}
+
 fn render_report(ws: &Workspace, cfg: &Config, st: &state::PipelineState) -> Result<String> {
     let mut out = String::new();
     out.push_str(&format!("# 交付报告 · {}（run {}）\n\n", ws.id, st.run_id));
@@ -127,7 +132,7 @@ fn render_report(ws: &Workspace, cfg: &Config, st: &state::PipelineState) -> Res
     let s5 = st.stage(StageId::S5).unwrap();
     let s6 = st.stage(StageId::S6).unwrap();
     out.push_str(&format!(
-        "- S5 生成产物哈希 {}（定制文件以 ICEWRIGHT-CUSTOM 标记保护）\n",
+        "- S5 生成产物哈希 {}（定制文件以 ICEWRIGHT-CUSTOM 标记保护，本地手工改动重生成时报冲突不静默覆盖）\n",
         short(s5.output_hash.as_ref())
     ));
     out.push_str(&format!(
@@ -135,6 +140,49 @@ fn render_report(ws: &Workspace, cfg: &Config, st: &state::PipelineState) -> Res
         s6.status,
         short(s6.output_hash.as_ref())
     ));
+    match read_eval(ws) {
+        Some(ev) => {
+            let rows = ev["cases"].as_array().cloned().unwrap_or_default();
+            let n = |want: &str| {
+                rows.iter()
+                    .filter(|c| c["status"].as_str() == Some(want))
+                    .count()
+            };
+            let (pass, fail, deferred) = (n("pass"), n("fail"), n("deferred"));
+            let judged = pass + fail;
+            out.push_str(&format!(
+                "- 评测回放：套件 {}（{} 用例）— 通过 {pass} · 失败 {fail} · 语义 deferred {deferred}，已判定通过率 {}\n",
+                ev["suite_id"].as_str().unwrap_or("?"),
+                rows.len(),
+                if judged == 0 {
+                    "-".to_string()
+                } else {
+                    format!("{:.0}%", 100.0 * pass as f64 / judged as f64)
+                }
+            ));
+            out.push_str(&format!(
+                "- hard 红线：{}\n",
+                if ev["hard_redline_breached"].as_bool() == Some(true) {
+                    "⚠ 违例（S6 已记 eval_failed）"
+                } else {
+                    "未违例"
+                }
+            ));
+            for c in &rows {
+                out.push_str(&format!(
+                    "  - {} [{}] → {}：{}\n",
+                    c["id"].as_str().unwrap_or("?"),
+                    c["hardness"].as_str().unwrap_or("?"),
+                    c["status"].as_str().unwrap_or("?"),
+                    c["detail"].as_str().unwrap_or("")
+                ));
+            }
+        }
+        None => out.push_str(&format!(
+            "- 评测回放：未执行（`icewright evaluate {} --url <生成系统地址>`）\n",
+            ws.id
+        )),
+    }
 
     out.push_str("\n## 5. 闸门B（验收确认）\n\n");
     out.push_str("- 本报告为确认对象：任何上游产物变更后须重新 `delivery render` 并再次确认。\n");
@@ -345,6 +393,37 @@ mod tests {
             st.stage(StageId::S7).unwrap().status,
             StageStatus::WaitingGate
         );
+    }
+
+    #[test]
+    fn report_reflects_eval_results() {
+        let ws = ready("eval");
+        publish(&ws).unwrap();
+        let md = std::fs::read_to_string(ws.artifact_path(DELIVERY_DOC)).unwrap();
+        assert!(md.contains("评测回放：未执行"), "{md}");
+
+        let ev = serde_json::json!({
+            "suite_id": "insurance/auto-claim/eval-v1",
+            "hard_redline_breached": false,
+            "cases": [
+                {"id": "EV-1", "hardness": "hard", "status": "pass", "detail": "3 条确定性断言全部通过"},
+                {"id": "EV-2", "hardness": "soft", "status": "deferred", "detail": "1 条语义/裁判断言待 M2 判定"}
+            ]
+        });
+        let p = ws.artifact_path(crate::evaluate::EVAL_RESULT);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(&p, serde_json::to_string(&ev).unwrap()).unwrap();
+        publish(&ws).unwrap();
+        let md = std::fs::read_to_string(ws.artifact_path(DELIVERY_DOC)).unwrap();
+        assert!(
+            md.contains(
+                "套件 insurance/auto-claim/eval-v1（2 用例）— 通过 1 · 失败 0 · 语义 deferred 1"
+            ),
+            "{md}"
+        );
+        assert!(md.contains("已判定通过率 100%"));
+        assert!(md.contains("hard 红线：未违例"));
+        assert!(md.contains("EV-2 [soft] → deferred"));
     }
 
     #[test]
