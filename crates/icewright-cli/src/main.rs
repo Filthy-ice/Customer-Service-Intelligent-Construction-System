@@ -38,6 +38,34 @@ enum Cmd {
         #[command(subcommand)]
         action: DesignAction,
     },
+    /// S5 代码生成（要求闸门A 对当前设计产物有效）
+    Generate {
+        ws: String,
+        /// 输出目录，缺省为 workspace 的 output/
+        #[arg(long)]
+        out: Option<String>,
+    },
+    /// S6 自动验证：对生成工程跑编译与单测，结论写回状态
+    Verify {
+        ws: String,
+        #[arg(long)]
+        out: Option<String>,
+        /// 目标栈解释器（缺省 $IW_PYTHON 或 python3）
+        #[arg(long)]
+        python: Option<String>,
+    },
+    /// S7 交付报告渲染与闸门B 验收确认
+    Delivery {
+        #[command(subcommand)]
+        action: DeliveryAction,
+    },
+    /// 评测回放：对运行中的生成系统执行 artifacts/evals/eval.json 用例
+    Evaluate {
+        ws: String,
+        /// 生成系统基址，如 http://127.0.0.1:8000
+        #[arg(long)]
+        url: String,
+    },
     /// 模型接入探测（最小补全请求验证端点/密钥/模型三件套）
     Model {
         #[command(subcommand)]
@@ -105,6 +133,34 @@ enum DesignAction {
         role: Option<String>,
     },
     /// 闸门A：驳回（必须附注）
+    Reject {
+        ws: String,
+        #[arg(long)]
+        by: String,
+        #[arg(long)]
+        note: String,
+        #[arg(long)]
+        role: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum DeliveryAction {
+    /// 渲染交付报告并进入 waiting_gate（产物变更会作废既往确认）
+    Render { ws: String },
+    /// 打印交付报告
+    Show { ws: String },
+    /// 闸门B：批准交付（绑定当前报告哈希）
+    Approve {
+        ws: String,
+        #[arg(long)]
+        by: String,
+        #[arg(long)]
+        note: Option<String>,
+        #[arg(long)]
+        role: Option<String>,
+    },
+    /// 闸门B：驳回（必须附注）
     Reject {
         ws: String,
         #[arg(long)]
@@ -404,6 +460,132 @@ fn cmd_design(action: &DesignAction) -> Result<()> {
     Ok(())
 }
 
+fn cmd_generate(ws_id: &str, out: Option<&str>) -> Result<()> {
+    let ws = Workspace::open(ws_id)?;
+    let out_dir = match out {
+        Some(p) => std::path::PathBuf::from(p),
+        None => ws.root.join("output"),
+    };
+    let report = icewright_core::generate::generate(&ws, &out_dir)?;
+    println!(
+        "S5 生成完成：{} 个文件 → {}（output {}）",
+        report.written.len(),
+        report.out_dir.display(),
+        &report.output_hash[7..15]
+    );
+    for f in &report.preserved {
+        println!("  保留定制文件（ICEWRIGHT-CUSTOM）: {f}");
+    }
+    println!("下一步：进入生成目录安装依赖并运行测试（见 README.md），S6 自动验证随后接入");
+    Ok(())
+}
+
+fn cmd_verify(ws_id: &str, out: Option<&str>, python: Option<&str>) -> Result<()> {
+    let ws = Workspace::open(ws_id)?;
+    let out_dir = match out {
+        Some(p) => std::path::PathBuf::from(p),
+        None => ws.root.join("output"),
+    };
+    let py = python
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(icewright_core::verify::default_python);
+    let checks = icewright_core::verify::verify(&ws, &out_dir, &py)?;
+    for c in &checks {
+        println!(
+            "  {}  {:<10} {}",
+            if c.ok { "PASS" } else { "FAIL" },
+            c.name,
+            c.detail.chars().take(120).collect::<String>()
+        );
+    }
+    if checks.iter().all(|c| c.ok) {
+        println!("S6 通过：可进入 S7 验收交付（评测集回放随后接入）");
+        Ok(())
+    } else {
+        anyhow::bail!("S6 未通过（状态已记为 failed），修复后重跑 `icewright verify {ws_id}`")
+    }
+}
+
+fn cmd_delivery(action: &DeliveryAction) -> Result<()> {
+    use icewright_core::delivery;
+    match action {
+        DeliveryAction::Render { ws } => {
+            let ws = Workspace::open(ws)?;
+            let (path, changed) = delivery::publish(&ws)?;
+            println!("交付报告已渲染: {path}");
+            if changed {
+                println!("内容较上次有变化：既往闸门B 确认已作废，需重新确认");
+            }
+            println!("审阅后执行 `icewright delivery approve|reject {}`", ws.id);
+        }
+        DeliveryAction::Show { ws } => {
+            let ws = Workspace::open(ws)?;
+            let p = ws.artifact_path(delivery::DELIVERY_DOC);
+            print!(
+                "{}",
+                std::fs::read_to_string(&p)
+                    .unwrap_or_else(|_| format!("尚未渲染: {}", p.display()))
+            );
+        }
+        DeliveryAction::Approve { ws, by, note, role } => {
+            let ws = Workspace::open(ws)?;
+            delivery::decide(
+                &ws,
+                state::GateDecision::Approved,
+                by,
+                parse_role(role.as_deref())?,
+                note.as_deref(),
+            )?;
+            println!("闸门B 已批准：交付生效，进入 S8 变更/重生成态");
+        }
+        DeliveryAction::Reject { ws, by, note, role } => {
+            let ws = Workspace::open(ws)?;
+            delivery::decide(
+                &ws,
+                state::GateDecision::Rejected,
+                by,
+                parse_role(role.as_deref())?,
+                Some(note),
+            )?;
+            println!("闸门B 已驳回：{note}");
+            println!("修订后重新 `icewright delivery render {}`", ws.id);
+        }
+    }
+    Ok(())
+}
+
+fn cmd_evaluate(ws_id: &str, url: &str) -> Result<()> {
+    let ws = Workspace::open(ws_id)?;
+    let outcomes = icewright_core::evaluate::evaluate(&ws, url)?;
+    for o in &outcomes {
+        println!(
+            "  {:<16} {:<16} {:>8}  {}",
+            o.id,
+            o.hardness,
+            match o.status {
+                icewright_core::evaluate::CaseStatus::Pass => "PASS",
+                icewright_core::evaluate::CaseStatus::Fail => "FAIL",
+                icewright_core::evaluate::CaseStatus::Deferred => "DEFER",
+            },
+            o.detail.chars().take(100).collect::<String>()
+        );
+    }
+    let breached = outcomes
+        .iter()
+        .any(|o| o.hardness == "hard" && o.status == icewright_core::evaluate::CaseStatus::Fail);
+    icewright_core::evaluate::write_stage_eval_failure(&ws, breached)?;
+    let total = outcomes.len();
+    let passed = outcomes
+        .iter()
+        .filter(|o| o.status == icewright_core::evaluate::CaseStatus::Pass)
+        .count();
+    println!("评测完成：{passed}/{total} 通过；结论写入 artifacts/delivery/eval-result.json");
+    if breached {
+        anyhow::bail!("hard 红线用例未通过（S6 已记 eval_failed），修复后重跑评测")
+    }
+    Ok(())
+}
+
 fn cmd_contract_check() -> Result<()> {
     let reports = icewright_artifact::selftest()?;
     let mut failed = 0;
@@ -446,6 +628,10 @@ fn main() -> Result<()> {
             SecretAction::Set { r#ref } => cmd_secret_set(r#ref),
         },
         Cmd::Design { action } => cmd_design(action),
+        Cmd::Generate { ws, out } => cmd_generate(ws, out.as_deref()),
+        Cmd::Verify { ws, out, python } => cmd_verify(ws, out.as_deref(), python.as_deref()),
+        Cmd::Delivery { action } => cmd_delivery(action),
+        Cmd::Evaluate { ws, url } => cmd_evaluate(ws, url),
         Cmd::Model { action } => match action {
             ModelAction::Probe { ws } => cmd_model_probe(ws),
         },
