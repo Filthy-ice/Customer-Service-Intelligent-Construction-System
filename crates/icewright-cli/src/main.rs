@@ -1094,7 +1094,15 @@ fn cmd_delivery(action: &DeliveryAction) -> Result<()> {
 
 fn cmd_evaluate(ws_id: &str, url: &str) -> Result<()> {
     let ws = open_ws(ws_id)?;
-    let outcomes = icewright_core::evaluate::evaluate(&ws, url)?;
+    // 裁判通道可选：模型不可用时语义断言记 deferred，确定性断言照常判定
+    let channel = model_channel(&ws).ok();
+    if channel.is_none() {
+        println!("{}", t("eval_no_channel"));
+    }
+    let outcomes = icewright_core::evaluate::evaluate(&ws, url, |msgs| match &channel {
+        Some((cfg, key)) => chat_call(&cfg.model, key, msgs),
+        None => Err(anyhow::anyhow!("模型通道未配置")),
+    })?;
     for o in &outcomes {
         println!(
             "  {:<16} {:<16} {:>8}  {}",

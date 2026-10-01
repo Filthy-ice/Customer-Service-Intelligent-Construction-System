@@ -100,6 +100,7 @@ const MESSAGES: &[(&str, &str, &str)] = &[
     ("delivery_fix", "修订后重新 `icewright delivery render {ws}`", "Amend and rerun `icewright delivery render {ws}`"),
     ("eval_done", "评测完成：{passed}/{total} 通过；结论写入 artifacts/delivery/eval-result.json", "Evaluation done: {passed}/{total} passed; verdict saved to artifacts/delivery/eval-result.json"),
     ("eval_hard_fail", "hard 红线用例未通过（S6 已记 eval_failed），修复后重跑评测", "Hard red-line cases failed (S6 recorded eval_failed); fix and rerun the evaluation"),
+    ("eval_no_channel", "提示：模型通道不可用（配置或密钥缺失），语义/裁判断言将记 deferred，仅确定性断言参与判定", "Note: model channel unavailable (config or key missing); semantic/judge assertions will be deferred, only deterministic assertions are judged"),
     ("contract_failed", "{n} 份契约实例校验失败", "{n} contract sample(s) failed validation"),
     ("contract_pass", "全部 {n} 份契约自检通过", "All {n} contracts passed self-check"),
 ];
