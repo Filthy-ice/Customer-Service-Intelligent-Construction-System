@@ -34,9 +34,13 @@
           <button id="vtab-output" type="button" data-i18n="tab_output">生成项目</button>
         </nav>
         <div id="vpane-flow">
-          <div id="env-banner" class="banner hidden"></div>
+          <div id="env-banner" class="banner hidden">
+            <span id="env-banner-text"></span>
+            <button id="env-retry" type="button" data-i18n="env_retry">重新预检并继续</button>
+          </div>
           <h3 class="sec-title" data-i18n="sec_flow">整体流程</h3>
           <div id="stepper" class="stepper"></div>
+          <div id="next-hint" class="next-hint"></div>
           <details class="sec" open>
             <summary><span data-i18n="sec_ops">操作与结果</span></summary>
             <section id="actions" class="actions">

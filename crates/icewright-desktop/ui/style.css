@@ -106,9 +106,23 @@ h3 { margin: 12px 0 8px; font-size: 14px; }
 /* 流程页分区、预检徽章与环境受阻横幅 */
 .sec-title { margin: 14px 0 8px; font-size: 12px; opacity: .65; }
 .banner { border: 1px solid #dc2626; background: #dc26261a; color: #b91c1c; border-radius: 8px;
-  padding: 8px 12px; font-size: 12.5px; line-height: 1.5; margin-bottom: 12px; }
+  padding: 8px 12px; font-size: 12.5px; line-height: 1.5; margin-bottom: 12px;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+#env-banner-text { flex: 1; min-width: 200px; }
+#env-retry { flex: none; border: 1px solid #dc2626; background: #dc2626; color: #fff;
+  border-radius: 6px; padding: 4px 12px; cursor: pointer; font-family: inherit; font-size: 12px; }
+#env-retry:hover { background: #b91c1c; }
 [data-theme="dark"] .banner { color: #fca5a5; }
 .banner.hidden { display: none; }
+/* 常驻下一步提示条：告诉用户当前该点什么、缺什么、如何继续 */
+.next-hint { border-radius: 8px; padding: 8px 12px; font-size: 13px; line-height: 1.5;
+  margin-bottom: 12px; border: 1px solid var(--line); background: #8881; }
+.next-hint.ok { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, Canvas); }
+.next-hint.bad { border-color: #dc2626; background: #dc26261a; color: #b91c1c; }
+.next-hint.gate { border-color: var(--arm-bd); background: var(--arm-bg); color: var(--arm-fg); }
+.next-hint.done { border-color: #16a34a; background: #16a34a1a; }
+.next-hint.warn { opacity: .85; }
+[data-theme="dark"] .next-hint.bad { color: #fca5a5; }
 .step.stale { opacity: .45; }
 tr.stale td { opacity: .55; }
 .stale-tag { margin-left: 6px; font-size: 10px; color: #b45309; border: 1px solid #f59e0b;

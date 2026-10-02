@@ -688,7 +688,27 @@ fn cmd_pipeline_status(ws_id: &str) -> Result<()> {
             usage
         );
     }
+    println!("{}", status_next_line(ws_id, &st));
     Ok(())
+}
+
+/// 依据状态机算出"下一步/怎么继续"的一行提示：环境受阻→重跑预检或 build；
+/// 停在闸门→批准后续跑；S7 已批→全部完成；否则→build 自动推进。CLI 与桌面端同逻辑。
+fn status_next_line(ws_id: &str, st: &state::PipelineState) -> String {
+    let is = |id: state::StageId, want: state::StageStatus| {
+        st.stage(id).map(|s| s.status == want).unwrap_or(false)
+    };
+    if !stage_approved(st, state::StageId::S2) {
+        tf("status_next_env", &[("ws", ws_id)])
+    } else if is(state::StageId::S4, state::StageStatus::WaitingGate) {
+        tf("status_next_gate_a", &[("ws", ws_id)])
+    } else if is(state::StageId::S7, state::StageStatus::WaitingGate) {
+        tf("status_next_gate_b", &[("ws", ws_id)])
+    } else if stage_approved(st, state::StageId::S7) {
+        t("status_done").into_owned()
+    } else {
+        tf("status_next_build", &[("ws", ws_id)])
+    }
 }
 
 fn cmd_pipeline_history(ws_id: &str, tail_n: usize) -> Result<()> {

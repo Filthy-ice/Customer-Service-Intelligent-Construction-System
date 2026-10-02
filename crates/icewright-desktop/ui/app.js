@@ -122,6 +122,12 @@ var DICT = {
       pf_fail: "预检未通过：修复 FAIL 项后重试",
       env_stale_banner: "S2 环境预检未通过：其后的绿色状态均为历史记录；修复 FAIL 项并重跑预检之前，后续所有推进操作都会被拒绝。",
       stale_tag: "历史记录",
+      env_retry: "重新预检并继续",
+      hint_none: "下一步：点「初始化」启动流水线；模型、语料、操作语言是否齐全会在预检里逐项报出",
+      hint_env: "下一步：修复上方 FAIL 项后点「重新预检并继续」，通过后自动提示下一步",
+      hint_gate: "下一步：等待人工确认——审阅后点「{0}」（驳回需填原因）",
+      hint_next: "下一步：点「{0}」推进",
+      hint_done: "S1→S7 已全部完成：可用「变更/重生成」增量更新",
       hist_prev: "上一页", hist_next: "下一页", hist_page: "第 {0} / {1} 页",
     },
   },
@@ -243,6 +249,12 @@ var DICT = {
       pf_fail: "Preflight failed: fix the FAIL items and retry",
       env_stale_banner: "S2 preflight failed: the green statuses after it are historical records. Until the failed checks are fixed and preflight re-runs, every downstream stage refuses to advance.",
       stale_tag: "historical",
+      env_retry: "Re-run preflight & continue",
+      hint_none: "Next: click \"Init\" to start the pipeline; whether the model, corpus and operation language are ready is reported check by check in preflight",
+      hint_env: "Next: fix the FAIL items above then click \"Re-run preflight & continue\"; the next step shows once it passes",
+      hint_gate: "Next: awaiting human approval—review then click \"{0}\" (rejection needs a reason)",
+      hint_next: "Next: click \"{0}\" to advance",
+      hint_done: "S1→S7 all done: use \"Change/regenerate\" for incremental updates",
       hist_prev: "Prev", hist_next: "Next", hist_page: "Page {0} of {1}",
     },
   },
@@ -425,6 +437,8 @@ function renderStatus(st) {
     $("run-meta").textContent = U("not_init");
     $("stepper").innerHTML = "";
     $("stage-rows").innerHTML = "";
+    $("env-banner").classList.add("hidden");
+    setHint("warn", U("hint_none"));
     return;
   }
   $("run-meta").textContent =
@@ -434,7 +448,8 @@ function renderStatus(st) {
   var envBad = statusOf(st, "S2") === "blocked_preflight" || statusOf(st, "S2") === "failed";
   var banner = $("env-banner");
   banner.classList.toggle("hidden", !envBad);
-  if (envBad) { banner.textContent = "⚠ " + U("env_stale_banner"); }
+  if (envBad) { $("env-banner-text").textContent = "⚠ " + U("env_stale_banner"); }
+  renderNextHint(st);
   function isStale(s, i) {
     return envBad && i > 1 && (s.status === "approved" || s.status === "waiting_gate");
   }
@@ -465,6 +480,23 @@ function renderStatus(st) {
       "<td>" + esc(gate) + "</td>";
     rows.appendChild(tr);
   });
+}
+
+function setHint(cls, text) {
+  var el = $("next-hint");
+  el.className = "next-hint " + cls;
+  el.textContent = text;
+}
+
+// 与 CLI status_next_line 同逻辑：环境受阻→重跑预检；停闸门→批准；S7 已批→完成；否则→下一个前进操作。
+function renderNextHint(st) {
+  if (statusOf(st, "S2") !== "approved") { setHint("bad", U("hint_env")); return; }
+  if (statusOf(st, "S4") === "waiting_gate") { setHint("gate", fmt(U("hint_gate"), [L().ops.design_approve])); return; }
+  if (statusOf(st, "S7") === "waiting_gate") { setHint("gate", fmt(U("hint_gate"), [L().ops.delivery_approve])); return; }
+  if (statusOf(st, "S7") === "approved") { setHint("done", U("hint_done")); return; }
+  var fwd = OPS.filter(function (s) { return !s.note && s.need(st); });
+  if (fwd.length) { setHint("ok", fmt(U("hint_next"), [labelOf(fwd[0])])); return; }
+  setHint("done", U("hint_done"));
 }
 
 /* ---------- 窗口内推进操作 ---------- */
@@ -582,6 +614,10 @@ function initActions() {
   $("op-note").addEventListener("input", async function () {
     renderActions(await currentStatus());
   });
+  var pfSpec = OPS.find(function (s) { return s.op === "preflight"; });
+  $("env-retry").onclick = function () {
+    if (!busy && pfSpec) { runOp(pfSpec); }
+  };
 }
 
 function titleOf(id) { return L().stage[id] || id; }
