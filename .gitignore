@@ -47,3 +47,4 @@ desktop.ini
 **/mutants.out*/
 *.tmp
 *.swp
+.cargo/config.toml
