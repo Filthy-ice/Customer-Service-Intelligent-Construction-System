@@ -253,6 +253,14 @@ fn open_corpus_dir(ws_id: String) -> Result<(), String> {
     open_url(&paths.corpus)
 }
 
+/// 交付导出：把 output/ 整树拷到客户指定目录，返回文件数（大目录拷贝放阻塞线程池）。
+#[tauri::command]
+async fn delivery_export(ws_id: String, dest: String) -> Result<u64, String> {
+    tauri::async_runtime::spawn_blocking(move || ops::delivery_export(&ws_id, &dest))
+        .await
+        .map_err(|e| format!("导出任务崩溃: {e}"))?
+}
+
 #[tauri::command]
 fn history_tail(ws_id: String, n: u32) -> Result<Vec<history::Event>, String> {
     let ws = Workspace::open(&ws_id).map_err(|e| e.to_string())?;
@@ -407,6 +415,7 @@ fn main() {
             output_save,
             open_output_dir,
             open_corpus_dir,
+            delivery_export,
             history_tail,
             app_version,
             ws_locale,

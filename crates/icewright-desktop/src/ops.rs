@@ -4,8 +4,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use chrono::Utc;
 use icewright_core::{
-    config, delivery, design, extract, generate, history, model, preflight, providers, secrets,
-    state, verify, Workspace,
+    config, delivery, design, export, extract, generate, history, model, preflight, providers,
+    secrets, state, verify, Workspace,
 };
 
 /// 同一时刻只允许一个推进操作，防止并发改写 state.json。
@@ -158,6 +158,14 @@ fn walk_files(dir: &std::path::Path, skip: &str) -> Result<Vec<WsFile>, String> 
         for entry in std::fs::read_dir(&d).map_err(|e| e.to_string())? {
             let p = entry.map_err(|e| e.to_string())?.path();
             if p.is_dir() {
+                // 与交付导出同一套垃圾目录判定（node_modules/target 等不进文件树视图）
+                let name = p
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                if export::is_build_junk(&name) {
+                    continue;
+                }
                 stack.push(p);
             } else if p.is_file() {
                 let rel = p.strip_prefix(dir).map_err(|e| e.to_string())?;
@@ -236,6 +244,26 @@ pub fn output_read(ws_id: &str, rel: &str) -> Result<String, String> {
 pub fn output_save(ws_id: &str, rel: &str, content: &str) -> Result<String, String> {
     let rel = output_rel_checked(rel)?;
     write_ws_file("output", ws_id, &rel, content)
+}
+
+/// 交付导出：把 output/ 整树拷到使用者/客户指定的普通目录（支持 ~ 开头），
+/// 返回落盘文件数。稳定错误码供前端双语映射。
+pub fn delivery_export(ws_id: &str, dest: &str) -> Result<u64, String> {
+    let ws = open(ws_id)?;
+    let raw = dest.trim();
+    if raw.is_empty() {
+        return Err("empty_dest".to_string());
+    }
+    let d = export::expand_home(raw).map_err(|e| e.to_string())?;
+    if !d.is_absolute() {
+        return Err("need_abs".to_string());
+    }
+    let out = ws.root.join("output");
+    if out.starts_with(&d) || d.starts_with(&out) {
+        return Err("dest_conflict".to_string());
+    }
+    let n = export::export_delivery(&ws, raw).map_err(|e| e.to_string())?;
+    Ok(n as u64)
 }
 
 /* ---------- 模型（AI 供应商）配置：结构化返回，文案由前端 i18n ---------- */
@@ -665,6 +693,57 @@ mod tests {
         }
         let paths = ws_paths("out-ws").unwrap();
         assert!(paths.output.starts_with(&paths.root));
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn delivery_export_copies_clean_tree() {
+        let _serial = HOME_LOCK.lock().unwrap();
+        let home = std::env::temp_dir().join(format!("iw-dsk-exp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        std::env::set_var("HOME", &home);
+
+        ws_create("exp-ws").unwrap();
+        assert_eq!(delivery_export("exp-ws", "").unwrap_err(), "empty_dest");
+        assert_eq!(
+            delivery_export("exp-ws", "relative/dir").unwrap_err(),
+            "need_abs"
+        );
+        // 尚无生成物：拒绝导出（引擎双语消息）
+        assert!(delivery_export("exp-ws", home.join("d0").to_str().unwrap()).is_err());
+
+        output_save("exp-ws", "app/main.py", "print(1)").unwrap();
+        output_save("exp-ws", "app/util/io.py", "x").unwrap();
+        // S6 构建垃圾：文件树视图与导出都要排除
+        let junk = ws_paths("exp-ws").unwrap().output;
+        std::fs::create_dir_all(format!("{junk}/node_modules/dep")).unwrap();
+        std::fs::write(format!("{junk}/node_modules/dep/index.js"), "junk").unwrap();
+        assert!(output_list("exp-ws")
+            .unwrap()
+            .iter()
+            .all(|f| !f.rel.contains("node_modules")));
+
+        let dest = home.join("deliver");
+        assert_eq!(
+            delivery_export("exp-ws", dest.to_str().unwrap()).unwrap(),
+            2
+        );
+        assert_eq!(
+            std::fs::read_to_string(dest.join("app/main.py")).unwrap(),
+            "print(1)"
+        );
+        assert!(!dest.join("node_modules").exists());
+
+        // 导出目标位于 output/ 内会自拷贝：拒绝
+        let inside = format!("{junk}/sub");
+        assert_eq!(
+            delivery_export("exp-ws", &inside).unwrap_err(),
+            "dest_conflict"
+        );
+        // ~ 展开为客户机主目录（非开发者也能写 ~/交付）
+        assert_eq!(delivery_export("exp-ws", "~/deliver2").unwrap(), 2);
+        assert!(home.join("deliver2/app/main.py").is_file());
         let _ = std::fs::remove_dir_all(&home);
     }
 

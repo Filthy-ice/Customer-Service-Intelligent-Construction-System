@@ -80,6 +80,10 @@ var DICT = {
       output_files: "生成文件",
       output_edit_ph: "点左侧文件查看，可直接编辑后保存",
       output_save: "保存修改",
+      export_ph: "导出交付到客户可见目录，如 桌面/客服交付 或 D:\\交付（可含 ~）",
+      export_go: "导出交付",
+      export_ok: "已导出 {0} 个交付文件到 {1}（node_modules/target 等构建垃圾已自动排除）",
+      export_busy: "导出交付中…",
       pick_file: "点左侧文件查看与编辑",
       no_corpus: "暂无语料：下方选分类、输文件名添加",
       no_output: "尚未生成项目：在「流程」页推进到「生成代码」",
@@ -98,6 +102,10 @@ var DICT = {
       err_s2_not_approved: "S2 环境预检未批准：先在「流程」页执行预检",
       err_rel: "文件路径不合法（语料须为「分类/文件名」，禁止 .. 和绝对路径）",
       err_big: "文件超过 4 MB 上限",
+      err_empty_dest: "导出目录不能为空",
+      err_need_abs: "导出目录必须是绝对路径（或 ~ 开头的家目录路径）",
+      err_dest_conflict: "导出目录不能位于工作区 output/ 之内",
+      err_empty_output: "output/ 尚无生成物可导出：先在「流程」页完成生成",
     },
   },
   en: {
@@ -176,6 +184,10 @@ var DICT = {
       output_files: "Generated files",
       output_edit_ph: "Pick a file on the left to view; edit directly and save",
       output_save: "Save edits",
+      export_ph: "Export delivery to a customer-visible folder, e.g. ~/Desktop/cs-delivery or D:\\delivery",
+      export_go: "Export delivery",
+      export_ok: "Exported {0} delivery files to {1} (build junk like node_modules/target excluded)",
+      export_busy: "Exporting delivery…",
       pick_file: "Pick a file on the left to view and edit",
       no_corpus: "No corpus yet: choose a category and add a file below",
       no_output: "Nothing generated yet: run through \"Generate code\" in the Flow tab",
@@ -194,6 +206,10 @@ var DICT = {
       err_s2_not_approved: "S2 preflight not approved: run Preflight in the Flow tab first",
       err_rel: "Invalid file path (corpus must be \"category/file\", no .. or absolute paths)",
       err_big: "File exceeds the 4 MB limit",
+      err_empty_dest: "Export destination is required",
+      err_need_abs: "Export destination must be absolute (or start with ~ for your home directory)",
+      err_dest_conflict: "Export destination must not live inside the workspace output/ directory",
+      err_empty_output: "Nothing to export yet: finish \"Generate code\" in the Flow tab first",
     },
   },
 };
@@ -680,6 +696,30 @@ function openDir(cmd, statusId) {
     .catch(function (err) { panelStatus(statusId, "✘ " + fmt(U("open_dir_fail"), [err])); });
 }
 
+/* ---------- 交付导出：把 output/ 拷到客户指定的普通目录 ---------- */
+var exporting = false;
+
+function exportDelivery() {
+  if (!selected) { panelStatus("output-status", "✘ " + U("set_pick_ws")); return; }
+  if (exporting) { return; }
+  var dest = $("export-dest").value.trim();
+  if (!dest) { panelStatus("output-status", "✘ " + U("err_empty_dest")); return; }
+  exporting = true;
+  $("export-go").disabled = true;
+  panelStatus("output-status", "⏳ " + U("export_busy"));
+  invoke("delivery_export", { wsId: selected, dest: dest })
+    .then(function (n) {
+      panelStatus("output-status", "✔ " + fmt(U("export_ok"), [n, dest]));
+    })
+    .catch(function (err) {
+      panelStatus("output-status", "✘ " + setErr(err));
+    })
+    .then(function () {
+      exporting = false;
+      $("export-go").disabled = false;
+    });
+}
+
 function initViewTabs() {
   ["flow", "corpus", "output"].forEach(function (k) {
     $("vtab-" + k).onclick = function () { showViewTab(k); };
@@ -692,6 +732,10 @@ function initViewTabs() {
   $("corpus-open").onclick = function () { openDir("open_corpus_dir", "corpus-status"); };
   $("output-save").onclick = saveOutput;
   $("output-open").onclick = function () { openDir("open_output_dir", "output-status"); };
+  $("export-go").onclick = exportDelivery;
+  $("export-dest").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { exportDelivery(); }
+  });
 }
 
 async function refresh() {
@@ -761,6 +805,9 @@ function setErr(err) {
     s2_not_approved: "err_s2_not_approved",
     invalid_rel: "err_rel",
     file_too_large: "err_big",
+    empty_dest: "err_empty_dest",
+    need_abs: "err_need_abs",
+    dest_conflict: "err_dest_conflict",
   };
   var key = map[String(err)];
   return key ? U(key) : String(err);

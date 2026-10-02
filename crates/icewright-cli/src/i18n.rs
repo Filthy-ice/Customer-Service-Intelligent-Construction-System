@@ -107,6 +107,7 @@ const MESSAGES: &[(&str, &str, &str)] = &[
     ("gate_b_approved", "闸门B 已批准：交付生效，进入 S8 变更/重生成态", "Gate B approved: delivery is effective; entering S8 change/regeneration"),
     ("gate_b_rejected", "闸门B 已驳回：{note}", "Gate B rejected: {note}"),
     ("delivery_fix", "修订后重新 `icewright delivery render {ws}`", "Amend and rerun `icewright delivery render {ws}`"),
+    ("delivery_exported", "已导出 {n} 个交付文件到 {path}（已排除 node_modules/target 等构建垃圾）", "Exported {n} delivery files to {path} (build junk like node_modules/target excluded)"),
     ("eval_done", "评测完成：{passed}/{total} 通过；结论写入 artifacts/delivery/eval-result.json", "Evaluation done: {passed}/{total} passed; verdict saved to artifacts/delivery/eval-result.json"),
     ("eval_hard_fail", "hard 红线用例未通过（S6 已记 eval_failed），修复后重跑评测", "Hard red-line cases failed (S6 recorded eval_failed); fix and rerun the evaluation"),
     ("eval_no_channel", "提示：模型通道不可用（配置或密钥缺失），语义/裁判断言将记 deferred，仅确定性断言参与判定", "Note: model channel unavailable (config or key missing); semantic/judge assertions will be deferred, only deterministic assertions are judged"),
@@ -166,6 +167,7 @@ const SUB_HELP: &[(&str, &str)] = &[
     ("delivery show", "print the delivery report"),
     ("delivery approve", "Gate B: approve delivery (bound to the current report hash)"),
     ("delivery reject", "Gate B: reject (note required)"),
+    ("delivery export", "copy the delivery tree (workspace output/) to a customer-visible folder you choose (e.g. Desktop); build junk like node_modules/target is excluded"),
     ("evaluate", "evaluation replay: run artifacts/evals/eval.json cases against a live generated system"),
     ("model", "model access probe (minimal completion request validating endpoint/key/model triple)"),
     ("model probe", "send a probe message to the model and report latency and usage"),
@@ -184,6 +186,11 @@ const ARG_HELP: &[(&str, &str, &str)] = &[
         "extract only these artifact kinds (apis/flows/dictionary/rules/skills); default extracts all five in dependency order",
     ),
     ("generate", "out", "output directory; defaults to the workspace's output/"),
+    (
+        "delivery export",
+        "to",
+        "destination folder for the customer (absolute path or ~/..., e.g. ~/Desktop/cs-delivery)",
+    ),
     (
         "verify",
         "python",

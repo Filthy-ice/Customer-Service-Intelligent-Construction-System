@@ -196,6 +196,12 @@ enum DeliveryAction {
         #[arg(long)]
         role: Option<String>,
     },
+    /// 导出交付物到指定目录（客户可见位置，如桌面）；排除构建垃圾
+    Export {
+        ws: String,
+        #[arg(long)]
+        to: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1138,6 +1144,17 @@ fn cmd_delivery(action: &DeliveryAction) -> Result<()> {
             )?;
             println!("{}", tf("gate_b_rejected", &[("note", note)]));
             println!("{}", tf("delivery_fix", &[("ws", &ws.id)]));
+        }
+        DeliveryAction::Export { ws, to } => {
+            let ws = open_ws(ws)?;
+            let n = icewright_core::export::export_delivery(&ws, to)?;
+            let dest = icewright_core::export::expand_home(to)?;
+            let n_s = n.to_string();
+            let path_s = dest.display().to_string();
+            println!(
+                "{}",
+                tf("delivery_exported", &[("n", &n_s), ("path", &path_s)])
+            );
         }
     }
     Ok(())
