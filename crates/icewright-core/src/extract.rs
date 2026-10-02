@@ -308,13 +308,25 @@ fn collect_files(dir: &Path, base: &Path, out: &mut Vec<std::path::PathBuf>) -> 
     Ok(())
 }
 
+/// corpus/ 下的图片快照（流程图照片等）：不参与文本提取，仅作留档，视觉解析通道接入后利用。
+pub fn corpus_images(ws_root: &Path) -> Result<Vec<std::path::PathBuf>> {
+    Ok(corpus_files(ws_root)?
+        .into_iter()
+        .filter(|p| crate::corpus::is_image_name(&p.file_name().unwrap().to_string_lossy()))
+        .collect())
+}
+
 /// 读取 corpus/ 全部文本文件（递归，含子目录分类），按相对路径排序，带字节上限。
+/// 图片语料跳过（走 corpus_images 留档），不阻断文本提取。
 pub fn load_corpus(ws_root: &Path) -> Result<String> {
     let dir = ws_root.join("corpus");
     let files = corpus_files(ws_root)?;
     let mut total = 0u64;
     let mut out = String::new();
     for p in files {
+        if crate::corpus::is_image_name(&p.file_name().unwrap().to_string_lossy()) {
+            continue;
+        }
         let size = std::fs::metadata(&p)?.len();
         total += size;
         if total > MAX_CORPUS_BYTES {
@@ -1165,6 +1177,22 @@ mod tests {
         icewright_artifact::example(kind.contract())
             .unwrap()
             .to_string()
+    }
+
+    #[test]
+    fn load_corpus_skips_image_snapshots() {
+        let base = std::env::temp_dir().join(format!("iw-extract-img-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let ws = crate::workspace::Workspace::create_at(&base, "img-ws").unwrap();
+        std::fs::write(ws.root.join("corpus/flows/流程.md"), "第一步：报案").unwrap();
+        std::fs::write(ws.root.join("corpus/flows/流程图.jpg"), [0xFF, 0xD8, 0x00]).unwrap();
+        let text = load_corpus(&ws.root).unwrap();
+        assert!(
+            text.contains("流程.md") && !text.contains("流程图.jpg"),
+            "{text}"
+        );
+        assert_eq!(corpus_images(&ws.root).unwrap().len(), 1);
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// canned 模型的回传：固定伪造用量，验证入账确定性。

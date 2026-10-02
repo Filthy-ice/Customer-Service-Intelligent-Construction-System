@@ -27,7 +27,9 @@ pub fn is_en() -> bool {
 const MESSAGES: &[(&str, &str, &str)] = &[
     ("ws_created", "已创建 workspace: {path}", "Workspace created: {path}"),
     ("ws_next", "下一步：编辑 icewright.toml 配置模型与行业包；需求材料留在原处，用 `icewright corpus add <ws> <文件或目录路径>` 导入（约定见 corpus/README.md）", "Next: edit icewright.toml to configure the model and industry pack; keep requirement files where they are and import them with `icewright corpus add <ws> <file-or-folder>` (see corpus/README.md)"),
-    ("corpus_added", "已导入 {src}：新增 {n} 个、更新 {u} 个、内容相同跳过 {same} 个、非文本跳过 {bin} 个", "Imported {src}: {n} new, {u} updated, {same} skipped as identical, {bin} skipped as non-text"),
+    ("corpus_added", "已导入 {src}：新增 {n} 个、更新 {u} 个、图片快照 {img} 张、内容相同跳过 {same} 个、非文本跳过 {bin} 个", "Imported {src}: {n} new, {u} updated, {img} image snapshot(s) stored, {same} skipped as identical, {bin} skipped as non-text"),
+    ("extract_img_note", "提示：{n} 张图片语料已留档但不参与文本提取（等待视觉解析通道接入后可利用），建议同时索要 mermaid/markdown/文字步骤版流程图", "Note: {n} image corpus file(s) are archived but excluded from text extraction (usable once a vision-parsing channel is added); ask for mermaid/markdown/text flowcharts too"),
+    ("corpus_img_tag", "(图片快照，待视觉解析接入)", "(image snapshot, pending vision parsing)"),
     ("corpus_add_no_paths", "请给出至少一个要导入的文件或目录路径", "Give at least one file or folder path to import"),
     ("corpus_list_empty", "corpus/ 尚无入库语料（顶层 README.md 为说明文件，不入库）：用 `icewright corpus add {ws} <文件或目录路径>` 从原处导入", "No corpus ingested yet (top-level README.md is documentation, not corpus): import files or folders in place with `icewright corpus add {ws} <file-or-folder>`"),
     ("corpus_list_total", "共 {n} 个文件、{bytes} 字节（提取时递归读取，总量有上限）", "{n} file(s), {bytes} bytes in total (read recursively at extraction; overall size is capped)"),

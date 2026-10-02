@@ -11,15 +11,28 @@ pub const CATS: [&str; 6] = ["rules", "apis", "flows", "dictionary", "skills", "
 /// 缺省分类：归不进五类的材料与分类目录一并送入提取。
 pub const DEFAULT_CAT: &str = "other";
 
+/// 图片语料扩展名：业务侧常见流程图/白板照片交付形态。快照照存（导入=留档），
+/// S3 文本提取不读图，视觉解析通道接入后即可利用；其余非 UTF-8 二进制仍拒之门外。
+pub const IMAGE_EXTS: [&str; 6] = ["jpg", "jpeg", "png", "webp", "bmp", "gif"];
+
+pub fn is_image_name(name: &str) -> bool {
+    match name.rfind('.') {
+        Some(i) => IMAGE_EXTS.contains(&name[i + 1..].to_ascii_lowercase().as_str()),
+        None => false,
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct ImportReport {
     /// 落盘相对路径（`分类/文件名`，相对 corpus/）
     pub copied: Vec<String>,
     /// 更新模式下覆盖了同名旧快照
     pub updated: Vec<String>,
+    /// 图片快照落盘路径（不参与文本提取，仅存档待视觉通道）
+    pub images: Vec<String>,
     /// 同名同内容已存在（幂等重导入时不重复拷贝）
     pub identical: usize,
-    /// 非 UTF-8 文本跳过（S3 只读文本语料）
+    /// 非文本非图片二进制跳过（S3 只读文本语料）
     pub skipped_binary: usize,
 }
 
@@ -126,19 +139,22 @@ pub fn import(ws: &Workspace, raw: &str, cat: Option<&str>, update: bool) -> Res
     let mut rep = ImportReport::default();
     for f in files {
         let bytes = std::fs::read(&f).with_context(|| format!("read {}", f.display()))?;
-        if String::from_utf8(bytes.clone()).is_err() {
-            rep.skipped_binary += 1;
-            continue;
-        }
         let name = f
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .context(t!("corpus_src_missing", f.display()))?;
+        let image = is_image_name(&name);
+        if !image && String::from_utf8(bytes.clone()).is_err() {
+            rep.skipped_binary += 1;
+            continue;
+        }
         if let Some((final_name, was_update)) = target_name(&dest, &name, &bytes, update)? {
             std::fs::write(dest.join(&final_name), &bytes)
                 .with_context(|| format!("write {}", dest.join(&final_name).display()))?;
             let rel = format!("{cat}/{final_name}");
-            if was_update {
+            if image {
+                rep.images.push(rel);
+            } else if was_update {
                 rep.updated.push(rel);
             } else {
                 rep.copied.push(rel);
@@ -177,14 +193,17 @@ mod tests {
             ],
             "{rep:?}"
         );
-        assert_eq!(rep.skipped_binary, 1);
+        // 图片快照留档入库（不丢），但走 images 清单而非文本 copied
+        assert_eq!(rep.images, vec!["rules/图片.png".to_string()]);
+        assert_eq!(rep.skipped_binary, 0);
         assert_eq!(rep.identical, 0);
         // 原件留在原处，不被改动
         assert!(inbox.join("理赔规则.md").is_file());
+        assert!(ws.root.join("corpus/rules/图片.png").is_file());
 
         // 幂等：同内容重导入只记 identical
         let rep2 = import(&ws, inbox.to_str().unwrap(), Some("rules"), false).unwrap();
-        assert!(rep2.copied.is_empty() && rep2.identical == 2, "{rep2:?}");
+        assert!(rep2.copied.is_empty() && rep2.identical == 3, "{rep2:?}");
 
         // 同名不同内容：同分类内加后缀共存，不覆盖既有语料；不同分类互不冲突
         std::fs::write(base.join("理赔规则.md"), "新规则").unwrap();

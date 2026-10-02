@@ -73,6 +73,7 @@ var DICT = {
       corpus_import_busy: "导入中…",
       corpus_import_ok: "已导入 {0} 个文件到 corpus/{1}",
       corpus_import_upd: "（{0} 个已覆盖更新）",
+      corpus_import_img: "（{0} 张图片已留档，暂不参与文本提取，待视觉解析接入；流程图建议另附文字版步骤）",
       corpus_import_same: "（{0} 个内容相同未重复入库）",
       corpus_import_bin: "（{0} 个非文本已跳过）",
       corpus_edit_ph: "在此编写或粘贴需求文本（markdown / 纯文本）",
@@ -180,6 +181,7 @@ var DICT = {
       corpus_import_busy: "Importing…",
       corpus_import_ok: "Imported {0} file(s) into corpus/{1}",
       corpus_import_upd: "({0} overwritten with fresh content)",
+      corpus_import_img: "({0} image(s) archived — excluded from text extraction until a vision-parsing channel is added; ask for a text/mermaid flowchart too)",
       corpus_import_same: "({0} already present with identical content)",
       corpus_import_bin: "({0} non-text file(s) skipped)",
       corpus_edit_ph: "Write or paste requirement text here (markdown / plain text)",
@@ -653,8 +655,10 @@ function importCorpus() {
     .then(function (r) {
       $("corpus-path").value = "";
       $("corpus-update").checked = false;
-      var msg = fmt(U("corpus_import_ok"), [String(r.copied.length + r.updated.length), r.cat]);
+      var imported = r.copied.length + r.updated.length + (r.images ? r.images.length : 0);
+      var msg = fmt(U("corpus_import_ok"), [String(imported), r.cat]);
       if (r.updated.length) { msg += fmt(U("corpus_import_upd"), [String(r.updated.length)]); }
+      if (r.images && r.images.length) { msg += fmt(U("corpus_import_img"), [String(r.images.length)]); }
       if (r.identical) { msg += fmt(U("corpus_import_same"), [String(r.identical)]); }
       if (r.skipped_binary) { msg += fmt(U("corpus_import_bin"), [String(r.skipped_binary)]); }
       panelStatus("corpus-status", "✔ " + msg);

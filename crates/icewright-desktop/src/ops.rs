@@ -247,6 +247,7 @@ pub struct CorpusImportResult {
     pub cat: String,
     pub copied: Vec<String>,
     pub updated: Vec<String>,
+    pub images: Vec<String>,
     pub identical: usize,
     pub skipped_binary: usize,
 }
@@ -292,6 +293,7 @@ pub fn corpus_import(
         },
         copied: rep.copied,
         updated: rep.updated,
+        images: rep.images,
         identical: rep.identical,
         skipped_binary: rep.skipped_binary,
     })
@@ -495,8 +497,17 @@ fn run_extract(ws_id: &str) -> Result<String, String> {
         })
     })
     .map_err(e2s)?;
+    let images = extract::corpus_images(&ws.root).map_err(e2s)?;
+    let img_note = if images.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\n注意：{} 张图片语料已留档但不参与文本提取（待视觉解析通道接入），建议同时索要 mermaid/markdown/文字步骤版流程图",
+            images.len()
+        )
+    };
     Ok(format!(
-        "S3 提取完成：五类产物已入账（apis→flows→dictionary→rules→skills）\n当前阶段：{:?}",
+        "S3 提取完成：五类产物已入账（apis→flows→dictionary→rules→skills）{img_note}\n当前阶段：{:?}",
         st.current_stage
     ))
 }

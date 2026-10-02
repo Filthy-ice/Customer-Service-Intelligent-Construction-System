@@ -308,6 +308,7 @@ fn cmd_corpus(action: &CorpusAction) -> Result<()> {
                             ("src", raw.trim()),
                             ("n", &rep.copied.len().to_string()),
                             ("u", &rep.updated.len().to_string()),
+                            ("img", &rep.images.len().to_string()),
                             ("same", &rep.identical.to_string()),
                             ("bin", &rep.skipped_binary.to_string()),
                         ]
@@ -315,6 +316,9 @@ fn cmd_corpus(action: &CorpusAction) -> Result<()> {
                 );
                 for rel in rep.copied.iter().chain(rep.updated.iter()) {
                     println!("  + {rel}");
+                }
+                for rel in &rep.images {
+                    println!("  + {rel} {}", t("corpus_img_tag"));
                 }
             }
         }
@@ -480,6 +484,18 @@ fn cmd_pipeline_preflight(ws_id: &str) -> Result<()> {
     }
 }
 
+/// 图片语料不参与文本提取：提取前显式提示，避免用户以为流程图"已经喂给模型了"。
+fn print_extract_img_note(ws: &icewright_core::workspace::Workspace) -> Result<()> {
+    let images = icewright_core::extract::corpus_images(&ws.root)?;
+    if !images.is_empty() {
+        println!(
+            "{}",
+            tf("extract_img_note", &[("n", &images.len().to_string())])
+        );
+    }
+    Ok(())
+}
+
 fn cmd_pipeline_extract(ws_id: &str, kinds: &[String]) -> Result<()> {
     use icewright_core::extract::Kind;
     let ws = open_ws(ws_id)?;
@@ -507,6 +523,7 @@ fn cmd_pipeline_extract(ws_id: &str, kinds: &[String]) -> Result<()> {
         .filter(|k| selected.contains(k))
         .collect::<Vec<_>>();
     let (cfg, key) = model_channel(&ws)?;
+    print_extract_img_note(&ws)?;
     let st =
         icewright_core::extract::run(&ws, &selected, |msgs| chat_call(&cfg.model, &key, msgs))?;
     print_extract_summary(&ws, &selected, &st)?;
@@ -722,6 +739,7 @@ fn cmd_build(ws_id: &str) -> Result<()> {
     } else {
         println!("{}", t("build_s3"));
         let (cfg, key) = model_channel(&ws)?;
+        print_extract_img_note(&ws)?;
         st = icewright_core::extract::run(&ws, &Kind::ORDER, |msgs| {
             chat_call(&cfg.model, &key, msgs)
         })?;
