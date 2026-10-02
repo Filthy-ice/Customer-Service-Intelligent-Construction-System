@@ -14,6 +14,14 @@ pub fn set_locale(raw: &str) {
     icewright_core::i18n::set_lang(if en { "en" } else { "zh" });
 }
 
+/// workspace.locale 层设语：ICERIGHT_LOCALE 存在时不得覆盖（优先级 env > workspace）。
+pub fn set_workspace_locale(raw: &str) {
+    if std::env::var_os("ICERIGHT_LOCALE").is_some() {
+        return;
+    }
+    set_locale(raw);
+}
+
 pub fn init_from_env() {
     if let Ok(v) = std::env::var("ICERIGHT_LOCALE") {
         set_locale(&v);

@@ -10,11 +10,11 @@ repository.workspace = true
 icewright-core = { path = "../icewright-core" }
 tauri = { version = "2", features = ["image-png"] }
 serde = { workspace = true }
+serde_json = { workspace = true }
 anyhow = { workspace = true }
 chrono = { workspace = true }
 
 [dev-dependencies]
-serde_json = { workspace = true }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

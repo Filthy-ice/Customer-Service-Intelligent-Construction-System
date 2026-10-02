@@ -198,6 +198,7 @@ pub fn publish(ws: &Workspace) -> Result<(String, bool)> {
         bail!("{}", t!("need_init", &ws.id));
     }
     let mut st = state::load_state(&path)?;
+    st.require_env_approved()?;
     if st.stage(StageId::S6).unwrap().status != StageStatus::Approved {
         bail!(
             "S6 自动验证未通过，无法交付：先运行 `icewright verify {}`",
@@ -255,6 +256,9 @@ pub fn decide(
     }
     if decision == GateDecision::Rejected && note.map(|n| n.trim().is_empty()).unwrap_or(true) {
         bail!("{}", t!("reject_needs_note"));
+    }
+    if decision == GateDecision::Approved {
+        st.require_env_approved()?;
     }
     let now = Utc::now();
     let out_hash = st

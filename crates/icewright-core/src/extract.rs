@@ -1069,6 +1069,10 @@ pub fn run<F>(ws: &Workspace, kinds: &[Kind], mut chat: F) -> Result<PipelineSta
 where
     F: FnMut(&[ChatMessage]) -> Result<CallOutcome>,
 {
+    if !ws.state_path().exists() {
+        bail!("{}", t!("need_init", &ws.id));
+    }
+    state::load_state(&ws.state_path())?.require_env_approved()?;
     let lang = ModelLang::resolve(&ws.config()?.workspace.model_lang);
     let corpus = load_corpus(&ws.root, lang)?;
     let mut extracted: Vec<(Kind, Value)> = Vec::new();
@@ -1305,6 +1309,17 @@ where
 mod tests {
     use super::*;
     use crate::state::StageStatus;
+
+    /// 单测直驱各阶段：run() 内含 S2 环境闸门，这里统一放行环境后再落状态。
+    fn env_ok_state(ws: &str, run: &str) -> state::PipelineState {
+        let mut st = state::PipelineState::new(ws, run, None);
+        st.stages
+            .iter_mut()
+            .find(|s| s.id == state::StageId::S2)
+            .unwrap()
+            .status = StageStatus::Approved;
+        st
+    }
 
     fn sample(kind: Kind) -> String {
         icewright_artifact::example(kind.contract())
@@ -1583,7 +1598,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
         let ws = Workspace::create_at(&base, "ex-cov").unwrap();
         std::fs::write(ws.root.join("corpus/规则.md"), "语料").unwrap();
-        let st0 = state::PipelineState::new("ex-cov", "run-20261001-0002", None);
+        let st0 = env_ok_state("ex-cov", "run-20261001-0002");
         state::save_state(&ws.state_path(), &st0).unwrap();
 
         let mut dict_user_msgs = Vec::new();
@@ -1616,7 +1631,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
         let ws = Workspace::create_at(&base, "ex-rec").unwrap();
         std::fs::write(ws.root.join("corpus/规则.md"), "语料").unwrap();
-        let st0 = state::PipelineState::new("ex-rec", "run-20261001-0003", None);
+        let st0 = env_ok_state("ex-rec", "run-20261001-0003");
         state::save_state(&ws.state_path(), &st0).unwrap();
 
         let apis: Value = serde_json::from_str(&sample(Kind::Apis)).unwrap();
@@ -1669,7 +1684,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
         let ws = Workspace::create_at(&base, "flowfix").unwrap();
         std::fs::write(ws.root.join("corpus/规则.md"), "语料").unwrap();
-        let st0 = state::PipelineState::new("flowfix", "run-20261001-0010", None);
+        let st0 = env_ok_state("flowfix", "run-20261001-0010");
         state::save_state(&ws.state_path(), &st0).unwrap();
         // 流程早于 rules/skills 提取：回填与 skill_call 引用了尚未问世的 id，模型只能自造
         let mut flows: Value = serde_json::from_str(&sample(Kind::Flows)).unwrap();
@@ -1742,7 +1757,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
         let ws = Workspace::create_at(&base, "ex-test").unwrap();
         std::fs::write(ws.root.join("corpus/规则.md"), "出险后 48 小时内报案").unwrap();
-        let st0 = state::PipelineState::new("ex-test", "run-20261001-0001", None);
+        let st0 = env_ok_state("ex-test", "run-20261001-0001");
         state::save_state(&ws.state_path(), &st0).unwrap();
 
         let st = run(&ws, &Kind::ORDER, canned_chat).unwrap();
@@ -1803,7 +1818,7 @@ mod tests {
         );
         std::fs::write(&cfg_path, raw).unwrap();
         std::fs::write(ws.root.join("corpus/规则.md"), "语料").unwrap();
-        let st0 = state::PipelineState::new("ex-cost", "run-20261001-0009", None);
+        let st0 = env_ok_state("ex-cost", "run-20261001-0009");
         state::save_state(&ws.state_path(), &st0).unwrap();
 
         let st = run(&ws, &Kind::ORDER, canned_chat).unwrap();
@@ -1826,7 +1841,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
         let ws = Workspace::create_at(&base, "void-test").unwrap();
         std::fs::write(ws.root.join("corpus/规则.md"), "语料").unwrap();
-        let st0 = state::PipelineState::new("void-test", "run-20261001-0003", None);
+        let st0 = env_ok_state("void-test", "run-20261001-0003");
         state::save_state(&ws.state_path(), &st0).unwrap();
         run(&ws, &Kind::ORDER, canned_chat).unwrap();
 
@@ -1877,7 +1892,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
         let ws = Workspace::create_at(&base, "bad-test").unwrap();
         std::fs::write(ws.root.join("corpus/规则.md"), "语料").unwrap();
-        let st0 = state::PipelineState::new("bad-test", "run-20261001-0002", None);
+        let st0 = env_ok_state("bad-test", "run-20261001-0002");
         state::save_state(&ws.state_path(), &st0).unwrap();
         // rules 引用了样例字典里没有的 FLD
         let bad_rules = serde_json::json!({

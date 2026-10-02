@@ -91,6 +91,7 @@ pub fn verify(ws: &Workspace, out_dir: &Path, python: &Path) -> Result<Vec<Check
         bail!("{}", t!("need_init", &ws.id));
     }
     let mut st = state::load_state(&state_path)?;
+    st.require_env_approved()?;
     if st.stage(StageId::S5).map(|s| s.status) != Some(StageStatus::Approved) {
         bail!("{}", t!("verify_s5_not_approved", &ws.id));
     }

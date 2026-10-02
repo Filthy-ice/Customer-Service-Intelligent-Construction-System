@@ -34,19 +34,23 @@
           <button id="vtab-output" type="button" data-i18n="tab_output">生成项目</button>
         </nav>
         <div id="vpane-flow">
+          <div id="env-banner" class="banner hidden"></div>
+          <h3 class="sec-title" data-i18n="sec_flow">整体流程</h3>
           <div id="stepper" class="stepper"></div>
+          <h3 class="sec-title" data-i18n="sec_ops">操作与结果</h3>
           <section id="actions" class="actions">
             <input id="op-note" type="text" placeholder="驳回原因（驳回类操作必填）" />
             <div id="op-buttons"></div>
           </section>
-          <pre id="op-result" class="op-result hidden"></pre>
+          <div id="op-result" class="op-result hidden"></div>
+          <h3 class="sec-title" data-i18n="sec_stages">阶段明细</h3>
           <table class="stages">
             <thead>
               <tr><th data-i18n="th_stage">阶段</th><th data-i18n="th_name">名称</th><th data-i18n="th_status">状态</th><th data-i18n="th_hash">产物哈希</th><th data-i18n="th_gate">闸门</th></tr>
             </thead>
             <tbody id="stage-rows"></tbody>
           </table>
-          <h3 data-i18n="history">生成历史</h3>
+          <h3 class="sec-title" data-i18n="history">生成历史</h3>
           <ul id="history"></ul>
         </div>
         <div id="vpane-corpus" class="hidden">

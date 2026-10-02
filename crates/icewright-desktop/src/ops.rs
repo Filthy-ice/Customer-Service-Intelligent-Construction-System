@@ -460,23 +460,16 @@ fn run_preflight(ws_id: &str) -> Result<String, String> {
     }
     let sroot = secrets::secrets_root().map_err(e2s)?;
     let (checks, all_ok) = preflight::run_and_record(&ws, &sroot).map_err(e2s)?;
-    let mut lines: Vec<String> = checks
-        .iter()
-        .map(|c| {
-            format!(
-                "{}  {:<16} {}",
-                if c.ok { "PASS" } else { "FAIL" },
-                c.name,
-                c.detail
-            )
-        })
-        .collect();
-    lines.push(if all_ok {
-        "预检通过".to_string()
-    } else {
-        "预检未通过：修复 FAIL 项后重试".to_string()
+    // 结构化返回：桌面端渲染徽章行；CLI 仍走 preflight::run_and_record 的同一数据出自成文本。
+    let payload = serde_json::json!({
+        "preflight": true,
+        "all_ok": all_ok,
+        "checks": checks
+            .iter()
+            .map(|c| serde_json::json!({ "name": c.name, "ok": c.ok, "detail": c.detail }))
+            .collect::<Vec<_>>(),
     });
-    Ok(lines.join("\n"))
+    Ok(payload.to_string())
 }
 
 /// S3 语料提取：与 CLI 同一条 core 路径（五类产物按依赖顺序），模型通道走 workspace 配置。
@@ -671,9 +664,19 @@ mod tests {
             Ok(r) => r,
             Err(e) => panic!("preflight dispatch 应返回清单而非中断: {e}"),
         };
+        let v: serde_json::Value =
+            serde_json::from_str(&report).expect("预检应返回结构化 JSON 供前端渲染徽章");
+        assert_eq!(v["preflight"].as_bool(), Some(true));
+        assert!(v["all_ok"].is_boolean(), "{report}");
+        let names: Vec<&str> = v["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["name"].as_str().unwrap())
+            .collect();
         assert!(
-            report.contains("PASS") || report.contains("FAIL"),
-            "{report}"
+            names.contains(&"corpus") && names.contains(&"stack"),
+            "{names:?}"
         );
         // S1/S2 事件已入账（与 CLI 同一历史账本）
         let ws = Workspace::open("live-e2e").unwrap();

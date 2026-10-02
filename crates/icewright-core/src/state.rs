@@ -1,5 +1,5 @@
 use crate::t;
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -282,6 +282,16 @@ impl PipelineState {
             },
             None => false,
         }
+    }
+
+    /// 环境闸门：S2 预检未批准时，后续阶段推进（提取/渲染/闸门批准/生成/验证/交付）一律拒绝。
+    /// 放在引擎层，CLI 与桌面客户端共用同一道闸。
+    pub fn require_env_approved(&self) -> Result<()> {
+        let s = self.stage(StageId::S2).unwrap();
+        if s.status != StageStatus::Approved {
+            bail!("{}", t!("s2_not_approved", format!("{:?}", s.status)));
+        }
+        Ok(())
     }
 }
 

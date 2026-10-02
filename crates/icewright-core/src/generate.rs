@@ -491,6 +491,7 @@ pub fn generate(ws: &Workspace, out_dir: &Path) -> Result<GenerateReport> {
     // 交付目录可能是客户口头指定的未建路径：落盘前先建好
     std::fs::create_dir_all(out_dir)?;
     let mut st = state::load_state(&state_path)?;
+    st.require_env_approved()?;
     if !st.gate_is_current(StageId::S4) {
         bail!("{}", t!("gate_a_not_active"));
     }
@@ -1021,6 +1022,19 @@ mod tests {
         state::save_state(&p, &st).unwrap();
         let err = generate(&ws, &ws.root.join("output")).unwrap_err();
         assert!(err.to_string().contains("闸门A未生效"), "{err}");
+    }
+
+    #[test]
+    fn env_gate_blocks_generation() {
+        let ws = setup("envgate");
+        let p = ws.state_path();
+        let mut st = state::load_state(&p).unwrap();
+        if let Some(s) = st.stages.iter_mut().find(|s| s.id == StageId::S2) {
+            s.status = StageStatus::BlockedPreflight;
+        }
+        state::save_state(&p, &st).unwrap();
+        let err = generate(&ws, &ws.root.join("output")).unwrap_err();
+        assert!(err.to_string().contains("环境预检未批准"), "{err}");
     }
 
     #[test]

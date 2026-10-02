@@ -265,7 +265,7 @@ enum ContractAction {
 fn open_ws(id: &str) -> Result<Workspace> {
     let ws = Workspace::open(id)?;
     if let Ok(cfg) = ws.config() {
-        i18n::set_locale(&cfg.workspace.locale);
+        i18n::set_workspace_locale(&cfg.workspace.locale);
     }
     Ok(ws)
 }

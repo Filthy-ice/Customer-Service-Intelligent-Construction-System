@@ -115,6 +115,13 @@ var DICT = {
       err_empty_path: "请输入要导入的文件或目录路径",
       err_need_abs: "交付目录必须是绝对路径（或 ~ 开头的家目录路径）",
       err_empty_output: "output/ 尚无生成物可导出：先在「流程」页完成生成",
+      sec_flow: "整体流程",
+      sec_ops: "操作与结果",
+      sec_stages: "阶段明细",
+      pf_pass: "预检通过：全部检查项合格",
+      pf_fail: "预检未通过：修复 FAIL 项后重试",
+      env_stale_banner: "S2 环境预检未通过：其后的绿色状态均为历史记录；修复 FAIL 项并重跑预检之前，后续所有推进操作都会被拒绝。",
+      stale_tag: "历史记录",
     },
   },
   en: {
@@ -228,6 +235,13 @@ var DICT = {
       err_empty_path: "Enter a file or folder path to import",
       err_need_abs: "Delivery folder must be absolute (or start with ~ for your home directory)",
       err_empty_output: "Nothing to export yet: finish \"Generate code\" in the Flow tab first",
+      sec_flow: "Pipeline overview",
+      sec_ops: "Actions & results",
+      sec_stages: "Stage details",
+      pf_pass: "Preflight passed: all checks OK",
+      pf_fail: "Preflight failed: fix the FAIL items and retry",
+      env_stale_banner: "S2 preflight failed: the green statuses after it are historical records. Until the failed checks are fixed and preflight re-runs, every downstream stage refuses to advance.",
+      stale_tag: "historical",
     },
   },
 };
@@ -415,27 +429,36 @@ function renderStatus(st) {
     "run " + st.run_id + " · pack " + (st.pack_ref || "-") +
     " · " + U("stage_now") + " " + st.current_stage +
     " · " + U("updated") + " " + fmtTs(st.updated_at);
+  var envBad = statusOf(st, "S2") === "blocked_preflight" || statusOf(st, "S2") === "failed";
+  var banner = $("env-banner");
+  banner.classList.toggle("hidden", !envBad);
+  if (envBad) { banner.textContent = "⚠ " + U("env_stale_banner"); }
+  function isStale(s, i) {
+    return envBad && i > 1 && (s.status === "approved" || s.status === "waiting_gate");
+  }
   var step = $("stepper");
   step.innerHTML = "";
-  st.stages.forEach(function (s) {
+  st.stages.forEach(function (s, i) {
     var cell = document.createElement("div");
-    cell.className = "step " + s.status;
-    cell.title = L().status[s.status] || s.status;
+    cell.className = "step " + s.status + (isStale(s, i) ? " stale" : "");
+    cell.title = (L().status[s.status] || s.status) + (isStale(s, i) ? " · " + U("stale_tag") : "");
     cell.innerHTML = "<b>" + esc(s.id) + "</b>" +
       "<span class='nm'>" + esc(titleOf(s.id)) + "</span>";
     step.appendChild(cell);
   });
   var rows = $("stage-rows");
   rows.innerHTML = "";
-  st.stages.forEach(function (s) {
+  st.stages.forEach(function (s, i) {
     var gate = s.gate
       ? (L().gate[s.gate.decision] || s.gate.decision) + " · " + s.gate.by
       : "";
     var tr = document.createElement("tr");
+    if (isStale(s, i)) { tr.className = "stale"; }
     tr.innerHTML =
       "<td>" + esc(s.id) + "</td>" +
       "<td>" + esc(titleOf(s.id)) + "</td>" +
-      "<td class='st-" + s.status + "'>" + (L().status[s.status] || s.status) + "</td>" +
+      "<td class='st-" + s.status + "'>" + (L().status[s.status] || s.status) +
+      (isStale(s, i) ? "<span class='stale-tag'>" + esc(U("stale_tag")) + "</span>" : "") + "</td>" +
       "<td><code>" + shortHash(s.output_hash) + "</code></td>" +
       "<td>" + esc(gate) + "</td>";
     rows.appendChild(tr);
@@ -448,13 +471,13 @@ var OPS = [
   { op: "init", need: function (st) { return !st; } },
   { op: "preflight", need: function (st) { return !!st; } },
   { op: "extract", need: function (st) { return statusOf(st, "S2") === "approved" && statusOf(st, "S3") !== "approved"; } },
-  { op: "design_render", need: function (st) { return statusOf(st, "S3") === "approved"; } },
-  { op: "design_approve", confirm: true, need: function (st) { return statusOf(st, "S4") === "waiting_gate"; } },
+  { op: "design_render", need: function (st) { return statusOf(st, "S2") === "approved" && statusOf(st, "S3") === "approved"; } },
+  { op: "design_approve", confirm: true, need: function (st) { return statusOf(st, "S2") === "approved" && statusOf(st, "S4") === "waiting_gate"; } },
   { op: "design_reject", note: true, need: function (st) { return statusOf(st, "S4") === "waiting_gate"; } },
-  { op: "generate", need: function (st) { return statusOf(st, "S4") === "approved"; } },
-  { op: "verify", need: function (st) { return statusOf(st, "S5") === "approved"; } },
-  { op: "delivery_render", need: function (st) { return statusOf(st, "S6") === "approved"; } },
-  { op: "delivery_approve", confirm: true, need: function (st) { return statusOf(st, "S7") === "waiting_gate"; } },
+  { op: "generate", need: function (st) { return statusOf(st, "S2") === "approved" && statusOf(st, "S4") === "approved"; } },
+  { op: "verify", need: function (st) { return statusOf(st, "S2") === "approved" && statusOf(st, "S5") === "approved"; } },
+  { op: "delivery_render", need: function (st) { return statusOf(st, "S2") === "approved" && statusOf(st, "S6") === "approved"; } },
+  { op: "delivery_approve", confirm: true, need: function (st) { return statusOf(st, "S2") === "approved" && statusOf(st, "S7") === "waiting_gate"; } },
   { op: "delivery_reject", note: true, need: function (st) { return statusOf(st, "S7") === "waiting_gate"; } },
 ];
 
@@ -519,13 +542,29 @@ async function runOp(spec) {
       op: spec.op, wsId: selected,
       note: spec.note ? note : null,
     });
-    res.textContent = "✔ " + label + "\n" + out;
+    if (spec.op === "preflight") { renderPreflight(out, label); }
+    else { res.textContent = "✔ " + label + "\n" + out; }
     $("op-note").value = "";
   } catch (err) {
     res.textContent = "✘ " + label + "\n" + setErr(err);
   }
   busy = false;
   await refresh();
+}
+
+function renderPreflight(out, label) {
+  var res = $("op-result");
+  var data = null;
+  try { data = JSON.parse(out); } catch (e) { data = null; }
+  if (!data || !data.checks) { res.textContent = "✔ " + label + "\n" + out; return; }
+  var html = "<div class='pf-verdict " + (data.all_ok ? "ok" : "bad") + "'>" +
+    (data.all_ok ? "✔ " + U("pf_pass") : "✘ " + U("pf_fail")) + "</div>";
+  data.checks.forEach(function (c) {
+    html += "<div class='pf-row'><span class='pf-badge " + (c.ok ? "pass" : "fail") + "'>" +
+      (c.ok ? "PASS" : "FAIL") + "</span><code class='pf-name'>" + esc(c.name) +
+      "</code><span class='pf-detail'>" + esc(c.detail) + "</span></div>";
+  });
+  res.innerHTML = html;
 }
 
 function initActions() {

@@ -384,6 +384,7 @@ pub fn publish(ws: &Workspace) -> Result<(String, bool)> {
         bail!("{}", t!("need_init", &ws.id));
     }
     let mut st = state::load_state(&path)?;
+    st.require_env_approved()?;
     if st.stage(StageId::S3).unwrap().status != StageStatus::Approved {
         bail!("{}", t!("design_s3_incomplete"));
     }
@@ -423,6 +424,9 @@ pub fn decide(
     let mut st = state::load_state(&path).context(t!("design_render_first"))?;
     if decision == GateDecision::Rejected && note.map(|n| n.trim().is_empty()).unwrap_or(true) {
         bail!("{}", t!("reject_needs_note"));
+    }
+    if decision == GateDecision::Approved {
+        st.require_env_approved()?;
     }
     let now = Utc::now();
     let s = st
@@ -489,13 +493,24 @@ mod tests {
             Some("insurance/auto-claim@0.1.0"),
         );
         let mut st = st;
-        st.stages
-            .iter_mut()
-            .find(|s| s.id == StageId::S3)
-            .unwrap()
-            .status = StageStatus::Approved;
+        for sid in [StageId::S2, StageId::S3] {
+            st.stages.iter_mut().find(|s| s.id == sid).unwrap().status = StageStatus::Approved;
+        }
         state::save_state(&ws.state_path(), &st).unwrap();
         (ws, base)
+    }
+
+    #[test]
+    fn publish_refused_while_preflight_red() {
+        let (ws, _base) = ws_with_rules("env-red");
+        let p = ws.state_path();
+        let mut st = state::load_state(&p).unwrap();
+        if let Some(s) = st.stages.iter_mut().find(|s| s.id == StageId::S2) {
+            s.status = StageStatus::BlockedPreflight;
+        }
+        state::save_state(&p, &st).unwrap();
+        let err = publish(&ws).unwrap_err();
+        assert!(err.to_string().contains("环境预检未批准"), "{err}");
     }
 
     #[test]

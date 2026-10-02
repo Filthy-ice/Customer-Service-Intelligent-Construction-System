@@ -61,6 +61,7 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ("s7_missing", "S7 不存在", "S7 is missing"),
     ("reject_needs_note", "驳回必须附注原因（--note）", "rejection requires a reason (--note)"),
     ("design_s3_incomplete", "S3 未完成，无法渲染设计文档", "S3 not finished, cannot render the design document"),
+    ("s2_not_approved", "S2 环境预检未批准（当前 {0}）：修复失败项并重跑预检后才能推进后续阶段", "S2 environment preflight not approved (currently {0}); fix the failed checks and re-run preflight before advancing downstream"),
     ("design_render_first", "请先 `icewright design render`（S4 尚无产物）", "run `icewright design render` first (S4 has no artifact yet)"),
     ("s4_missing", "状态缺少 S4", "state is missing S4"),
     ("s4_not_waiting", "S4 当前状态为 {0}，不在等待确认", "S4 is currently {0}, not waiting for confirmation"),
