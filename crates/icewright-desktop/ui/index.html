@@ -13,6 +13,7 @@
       <div class="lang-toggle" id="lang-toggle">
         <button id="lang-zh" type="button">中文</button><button id="lang-en" type="button">EN</button>
       </div>
+      <button id="open-settings" class="link-btn" type="button" data-i18n="settings">模型设置…</button>
       <div class="section-title" data-i18n="workspaces">工作区</div>
       <ul id="ws-list"></ul>
       <div class="hint"><span data-i18n="hint_pre">运行</span>
@@ -53,6 +54,29 @@
       <div class="about-actions">
         <button id="about-github" type="button" data-i18n="about_github">GitHub 主页</button>
         <button id="about-close" type="button" class="primary" data-i18n="about_close">关闭</button>
+      </div>
+    </div>
+  </div>
+  <div id="settings-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="set-title">
+    <div class="modal-card settings-card">
+      <h3 id="set-title" data-i18n="settings">模型设置</h3>
+      <label for="set-provider" data-i18n="set_provider">供应商</label>
+      <select id="set-provider"></select>
+      <label for="set-base" data-i18n="set_base">接入点 Base URL</label>
+      <input id="set-base" type="text" placeholder="https://api.example.com/v1" />
+      <label for="set-model" data-i18n="set_model">模型名</label>
+      <div class="set-row">
+        <input id="set-model" type="text" />
+        <button id="set-discover" type="button" data-i18n="set_discover">在线发现</button>
+      </div>
+      <select id="set-found" class="hidden"></select>
+      <label for="set-key" data-i18n="set_key">密钥引用</label>
+      <input id="set-key" type="text" placeholder="env://DEEPSEEK_API_KEY" />
+      <div class="set-hint" data-i18n="set_key_hint"></div>
+      <div id="set-status" class="set-status"></div>
+      <div class="about-actions">
+        <button id="set-save" type="button" class="primary" data-i18n="set_save">保存</button>
+        <button id="set-close" type="button" data-i18n="set_close">关闭</button>
       </div>
     </div>
   </div>

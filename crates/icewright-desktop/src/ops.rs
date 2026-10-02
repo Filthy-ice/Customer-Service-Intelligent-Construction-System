@@ -4,7 +4,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use chrono::Utc;
 use icewright_core::{
-    delivery, design, generate, history, preflight, secrets, state, verify, Workspace,
+    config, delivery, design, generate, history, preflight, providers, secrets, state, verify,
+    Workspace,
 };
 
 /// 同一时刻只允许一个推进操作，防止并发改写 state.json。
@@ -80,6 +81,94 @@ pub fn dispatch(op: &str, ws_id: &str, note: Option<&str>) -> Result<String, Str
 
 fn open(ws_id: &str) -> Result<Workspace, String> {
     Workspace::open(ws_id).map_err(e2s)
+}
+
+/* ---------- 模型（AI 供应商）配置：结构化返回，文案由前端 i18n ---------- */
+
+#[derive(serde::Serialize)]
+pub struct ModelInfo {
+    pub base_url: String,
+    pub model: String,
+    /// 密钥引用 URI；plain: 形态只回显掩码，明文不出引擎
+    pub key_ref: String,
+}
+
+pub fn model_get(ws_id: &str) -> Result<ModelInfo, String> {
+    let cfg = open(ws_id)?.config().map_err(e2s)?;
+    let shown = if secrets::SecretRef::parse(&cfg.model.key_ref)
+        .map(|r| r.is_plaintext())
+        .unwrap_or(false)
+    {
+        "plain:****".to_string()
+    } else {
+        cfg.model.key_ref.clone()
+    };
+    Ok(ModelInfo {
+        base_url: cfg.model.base_url,
+        model: cfg.model.model,
+        key_ref: shown,
+    })
+}
+
+/// 校验错误返回稳定 code（前端映射双语文案）；引擎错误透传（已双语）。
+pub fn model_set(ws_id: &str, base_url: &str, model: &str, key_ref: &str) -> Result<(), String> {
+    let ws = open(ws_id)?;
+    let base = base_url.trim().trim_end_matches('/');
+    if !base.starts_with("http://") && !base.starts_with("https://") {
+        return Err("invalid_base_url".to_string());
+    }
+    if model.trim().is_empty() {
+        return Err("invalid_model".to_string());
+    }
+    let key = key_ref.trim();
+    if !key.is_empty() && !key.starts_with("plain:****") {
+        secrets::SecretRef::parse(key).map_err(e2s)?;
+    } else if key.starts_with("plain:****") {
+        // 掩码回显不允许原样存回，避免把 **** 当密钥
+        return Err("invalid_key_ref".to_string());
+    }
+    let path = ws.root.join("icewright.toml");
+    config::set_and_save(&path, "model.base_url", base).map_err(e2s)?;
+    config::set_and_save(&path, "model.model", model.trim()).map_err(e2s)?;
+    if !key.is_empty() {
+        config::set_and_save(&path, "model.key_ref", key).map_err(e2s)?;
+    }
+    Ok(())
+}
+
+/// 在线发现可用模型：优先用给定 key_ref 解出密钥，否则按目录里同接入点的
+/// key_envs 候选逐个取环境变量（与 CLI discover 同策略）。
+pub fn model_discover(base_url: &str, key_ref: Option<&str>) -> Result<Vec<String>, String> {
+    let base = base_url.trim().trim_end_matches('/');
+    let key = match key_ref.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(r) => {
+            let sr = secrets::SecretRef::parse(r).map_err(e2s)?;
+            secrets::resolve(&sr).map_err(e2s)?
+        }
+        None => {
+            let mut cands: Vec<String> = providers::catalog()
+                .map_err(e2s)?
+                .into_iter()
+                .filter(|p| p.base_url.trim().trim_end_matches('/') == base)
+                .flat_map(|p| p.key_envs)
+                .collect();
+            if cands
+                .iter()
+                .all(|v| std::env::var(v).ok().filter(|s| !s.is_empty()).is_none())
+            {
+                cands.push("OPENAI_API_KEY".to_string());
+            }
+            cands
+                .iter()
+                .find_map(|v| std::env::var(v).ok().filter(|s| !s.is_empty()))
+                .ok_or_else(|| "no_key_env".to_string())?
+        }
+    };
+    providers::list_models(base, &key, std::time::Duration::from_secs(20)).map_err(e2s)
+}
+
+pub fn provider_catalog() -> Result<Vec<providers::Provider>, String> {
+    providers::catalog().map_err(e2s)
 }
 
 fn ws_init(ws_id: &str) -> Result<String, String> {
@@ -305,5 +394,61 @@ mod tests {
         assert!(Guard::acquire().is_err(), "占用期间第二次 acquire 必须失败");
         drop(g);
         assert!(Guard::acquire().is_ok());
+    }
+
+    #[test]
+    fn model_config_roundtrip_validation_and_masking() {
+        let _serial = HOME_LOCK.lock().unwrap();
+        let home = std::env::temp_dir().join(format!("iw-dsk-model-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        std::env::set_var("HOME", &home);
+
+        Workspace::create("mod-ws").unwrap();
+        let info = model_get("mod-ws").unwrap();
+        assert!(info.base_url.is_empty() && info.model.is_empty());
+
+        assert_eq!(
+            model_set("mod-ws", "ftp://x", "m", "").unwrap_err(),
+            "invalid_base_url"
+        );
+        assert_eq!(
+            model_set("mod-ws", "https://api.example.com/v1", "  ", "").unwrap_err(),
+            "invalid_model"
+        );
+        // 非法 key_ref 由引擎报错（双语），不是稳定 code
+        assert!(model_set("mod-ws", "https://api.example.com/v1", "m", "bogus-ref").is_err());
+
+        model_set(
+            "mod-ws",
+            "https://api.example.com/v1/",
+            "deepseek-chat",
+            "env://DEEPSEEK_API_KEY",
+        )
+        .unwrap();
+        let info = model_get("mod-ws").unwrap();
+        assert_eq!(
+            info.base_url, "https://api.example.com/v1",
+            "尾部斜杠应去除"
+        );
+        assert_eq!(info.model, "deepseek-chat");
+        assert_eq!(info.key_ref, "env://DEEPSEEK_API_KEY");
+
+        // plain 密钥回显必须掩码，且掩码值不许原样存回
+        model_set(
+            "mod-ws",
+            "https://api.example.com/v1",
+            "m",
+            "plain:secret123",
+        )
+        .unwrap();
+        assert_eq!(model_get("mod-ws").unwrap().key_ref, "plain:****");
+        assert_eq!(
+            model_set("mod-ws", "https://api.example.com/v1", "m", "plain:****").unwrap_err(),
+            "invalid_key_ref"
+        );
+
+        assert!(!provider_catalog().unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&home);
     }
 }

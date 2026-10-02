@@ -25,6 +25,7 @@ struct MenuText {
     file: &'static str,
     refresh: &'static str,
     reload: &'static str,
+    settings: &'static str,
     quit: &'static str,
     view: &'static str,
     lang: &'static str,
@@ -38,6 +39,7 @@ const TEXTS_ZH: MenuText = MenuText {
     file: "文件",
     refresh: "刷新",
     reload: "重新加载",
+    settings: "模型设置…",
     quit: "退出",
     view: "视图",
     lang: "语言",
@@ -51,6 +53,7 @@ const TEXTS_EN: MenuText = MenuText {
     file: "File",
     refresh: "Refresh",
     reload: "Reload",
+    settings: "Model Settings…",
     quit: "Quit",
     view: "View",
     lang: "Language",
@@ -88,6 +91,7 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     #[cfg(target_os = "macos")]
     let app_submenu = SubmenuBuilder::new(app, "IceWright")
         .item(&item(app, "about", t.about, None)?)
+        .item(&item(app, "settings", t.settings, Some("CmdOrCtrl+,"))?)
         .separator()
         .item(&PredefinedMenuItem::hide(app, Some("Hide IceWright"))?)
         .item(&PredefinedMenuItem::hide_others(app, Some("Hide Others"))?)
@@ -96,15 +100,20 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         .item(&PredefinedMenuItem::quit(app, Some(t.quit))?)
         .build()?;
 
-    let mut file = SubmenuBuilder::new(app, t.file)
+    // macOS 惯例：偏好设置与退出都在应用菜单；Win/Linux 收进文件菜单。
+    #[cfg(target_os = "macos")]
+    let file = SubmenuBuilder::new(app, t.file)
         .item(&item(app, "refresh", t.refresh, Some("F5"))?)
         .item(&item(app, "reload", t.reload, Some("CmdOrCtrl+R"))?)
-        .separator();
+        .build()?;
     #[cfg(not(target_os = "macos"))]
-    {
-        file = file.item(&item(app, "quit", t.quit, Some("CmdOrCtrl+Q"))?);
-    }
-    let file = file.build()?;
+    let file = SubmenuBuilder::new(app, t.file)
+        .item(&item(app, "refresh", t.refresh, Some("F5"))?)
+        .item(&item(app, "reload", t.reload, Some("CmdOrCtrl+R"))?)
+        .item(&item(app, "settings", t.settings, Some("CmdOrCtrl+,"))?)
+        .separator()
+        .item(&item(app, "quit", t.quit, Some("CmdOrCtrl+Q"))?)
+        .build()?;
 
     let lang_zh = item(app, "lang_zh", "中文", None)?;
     let lang_en = item(app, "lang_en", "English", None)?;
@@ -240,6 +249,34 @@ fn open_github() {
     open_url(GITHUB_URL);
 }
 
+#[tauri::command]
+fn model_providers() -> Result<Vec<icewright_core::providers::Provider>, String> {
+    ops::provider_catalog()
+}
+
+#[tauri::command]
+fn model_get(ws_id: String) -> Result<ops::ModelInfo, String> {
+    ops::model_get(&ws_id)
+}
+
+#[tauri::command]
+fn model_set(
+    ws_id: String,
+    base_url: String,
+    model: String,
+    key_ref: String,
+) -> Result<(), String> {
+    ops::model_set(&ws_id, &base_url, &model, &key_ref)
+}
+
+/// 在线发现是阻塞 HTTP 调用，放 spawn_blocking 避免卡 UI 线程。
+#[tauri::command]
+async fn model_discover(base_url: String, key_ref: Option<String>) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || ops::model_discover(&base_url, key_ref.as_deref()))
+        .await
+        .map_err(|e| format!("发现任务崩溃: {e}"))?
+}
+
 /// 菜单栏点击统一走这里：能本地处理的（退出/打开链接/切语种）直接处理，
 /// 其余以 menu-action 事件转发给前端。
 fn handle_menu_action(app: &tauri::AppHandle, id: &str) {
@@ -251,7 +288,7 @@ fn handle_menu_action(app: &tauri::AppHandle, id: &str) {
             let _ = apply_menu(app);
             let _ = app.emit("menu-action", format!("lang:{}", &id[5..]));
         }
-        "refresh" | "reload" | "about" => {
+        "refresh" | "reload" | "about" | "settings" => {
             let _ = app.emit("menu-action", id);
         }
         _ => {}
@@ -269,7 +306,11 @@ fn main() {
             run_op,
             set_menu_lang,
             show_window,
-            open_github
+            open_github,
+            model_providers,
+            model_get,
+            model_set,
+            model_discover
         ])
         .setup(|app| {
             apply_menu(app.handle())?;

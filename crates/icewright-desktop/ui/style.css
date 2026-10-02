@@ -100,3 +100,18 @@ h3 { margin: 12px 0 8px; font-size: 14px; }
   body, #detail, #op-result, .modal-card, .step.running { animation: none; }
   #op-buttons button, .about-actions button, #ws-list li, .lang-toggle button { transition: none; }
 }
+/* 模型设置面板 */
+.link-btn { align-self: flex-start; border: 1px solid var(--line); background: transparent; color: inherit;
+  border-radius: 6px; padding: 3px 10px; font-family: inherit; font-size: 12px; cursor: pointer; opacity: .85; }
+.link-btn:hover { opacity: 1; background: #8882; }
+.settings-card { width: 440px; text-align: left; align-items: stretch; gap: 4px; }
+.settings-card h3 { margin: 0 0 6px; text-align: center; }
+.settings-card label { font-size: 12px; opacity: .7; margin-top: 6px; }
+.settings-card input, .settings-card select { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px;
+  font-family: inherit; font-size: 13px; background: var(--btn-bg); color: inherit; width: 100%; }
+.set-row { display: flex; gap: 6px; }
+.set-row input { flex: 1; }
+.set-row button { flex: none; padding: 5px 12px; border: 1px solid var(--accent); color: var(--accent);
+  background: transparent; border-radius: 6px; font-family: inherit; font-size: 12.5px; cursor: pointer; }
+.set-hint { font-size: 11px; opacity: .6; line-height: 1.5; }
+.set-status { font-size: 12px; min-height: 18px; color: var(--warn); white-space: pre-wrap; }

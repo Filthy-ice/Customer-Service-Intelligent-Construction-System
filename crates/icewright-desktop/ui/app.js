@@ -36,6 +36,24 @@ var DICT = {
       about_desc: "S1–S8 流水线构建器：把行业规则与流程交给 AI，产出可交付的客服系统。",
       about_github: "GitHub 主页",
       about_close: "关闭",
+      settings: "模型设置",
+      set_provider: "供应商",
+      set_base: "接入点 Base URL",
+      set_model: "模型名",
+      set_discover: "在线发现",
+      set_key: "密钥引用",
+      set_key_hint: "只存引用不存密钥：env://变量名 / keyring://服务/账号 / plain:明文（不推荐）",
+      set_save: "保存",
+      set_close: "关闭",
+      set_custom: "自定义 / 私有端点",
+      set_found_n: "发现 {0} 个可用模型，点选填入",
+      set_saved: "已保存到本工作区 icewright.toml",
+      set_discovering: "发现中…",
+      set_pick_ws: "先在左侧选择工作区",
+      err_base: "接入点必须以 http(s):// 开头",
+      err_model: "模型名不能为空",
+      err_key: "密钥引用格式不合法（掩码值需重新输入）",
+      err_no_key: "未找到密钥环境变量：请填写密钥引用或先设置对应变量",
     },
   },
   en: {
@@ -70,6 +88,24 @@ var DICT = {
       about_desc: "S1-S8 pipeline builder: hand industry rules and flows to the AI, get a deliverable customer-service system back.",
       about_github: "GitHub Homepage",
       about_close: "Close",
+      settings: "Model Settings",
+      set_provider: "Provider",
+      set_base: "Base URL",
+      set_model: "Model",
+      set_discover: "Discover",
+      set_key: "Key reference",
+      set_key_hint: "Store a reference, never the key itself: env://VAR / keyring://service/account / plain:literal (not recommended)",
+      set_save: "Save",
+      set_close: "Close",
+      set_custom: "Custom / private endpoint",
+      set_found_n: "{0} models found, pick one to fill in",
+      set_saved: "Saved to this workspace's icewright.toml",
+      set_discovering: "Discovering…",
+      set_pick_ws: "Pick a workspace on the left first",
+      err_base: "Base URL must start with http(s)://",
+      err_model: "Model name is required",
+      err_key: "Invalid key reference (re-enter if it shows a mask)",
+      err_no_key: "No key environment variable found: set a key reference or export the variable first",
     },
   },
 };
@@ -358,6 +394,115 @@ function initAbout() {
   });
 }
 
+function setErr(err) {
+  var map = {
+    invalid_base_url: "err_base",
+    invalid_model: "err_model",
+    invalid_key_ref: "err_key",
+    no_key_env: "err_no_key",
+  };
+  var key = map[String(err)];
+  return key ? U(key) : String(err);
+}
+
+function setProviderOptions(list) {
+  var sel = $("set-provider");
+  sel.innerHTML = "";
+  list.forEach(function (p) {
+    var o = document.createElement("option");
+    o.value = p.name;
+    o.textContent = p.display + " · " + p.base_url;
+    o.o = p;
+    sel.appendChild(o);
+  });
+  var custom = document.createElement("option");
+  custom.value = "";
+  custom.textContent = U("set_custom");
+  custom.o = null;
+  sel.appendChild(custom);
+}
+
+function fillFromProvider() {
+  var sel = $("set-provider");
+  var opt = sel.options[sel.selectedIndex];
+  if (opt && opt.o) {
+    $("set-base").value = opt.o.base_url;
+    if (!$("set-model").value) { $("set-model").value = opt.o.default_model; }
+    var envs = opt.o.key_envs || [];
+    if (envs.length) { $("set-key").placeholder = "env://" + envs[0]; }
+  }
+}
+
+function openSettings() {
+  if (!selected) {
+    $("set-status").textContent = U("set_pick_ws");
+    $("settings-modal").classList.remove("hidden");
+    return;
+  }
+  $("set-status").textContent = "";
+  $("set-found").classList.add("hidden");
+  $("settings-modal").classList.remove("hidden");
+  Promise.all([invoke("model_providers"), invoke("model_get", { wsId: selected })])
+    .then(function (rs) {
+      var list = rs[0], info = rs[1];
+      setProviderOptions(list);
+      var match = list.find(function (p) { return p.base_url === info.base_url; });
+      $("set-provider").value = match ? match.name : "";
+      $("set-base").value = info.base_url || "";
+      $("set-model").value = info.model || "";
+      $("set-key").value = info.key_ref || "";
+    })
+    .catch(function (err) { $("set-status").textContent = setErr(err); });
+}
+
+function closeSettings() { $("settings-modal").classList.add("hidden"); }
+
+function discoverModels() {
+  var base = $("set-base").value.trim();
+  var status = $("set-status");
+  status.textContent = U("set_discovering");
+  invoke("model_discover", { baseUrl: base, keyRef: $("set-key").value.trim() || null })
+    .then(function (ids) {
+      var sel = $("set-found");
+      sel.innerHTML = "";
+      ids.forEach(function (id) {
+        var o = document.createElement("option");
+        o.value = id; o.textContent = id;
+        sel.appendChild(o);
+      });
+      sel.classList.remove("hidden");
+      status.textContent = fmt(U("set_found_n"), [ids.length]);
+    })
+    .catch(function (err) { status.textContent = setErr(err); });
+}
+
+function saveModel() {
+  invoke("model_set", {
+    wsId: selected,
+    baseUrl: $("set-base").value,
+    model: $("set-model").value,
+    keyRef: $("set-key").value,
+  }).then(function () {
+    $("set-status").textContent = U("set_saved");
+    tick();
+  }).catch(function (err) { $("set-status").textContent = setErr(err); });
+}
+
+function initSettings() {
+  $("open-settings").onclick = openSettings;
+  $("set-close").onclick = closeSettings;
+  $("set-save").onclick = saveModel;
+  $("set-discover").onclick = discoverModels;
+  $("set-provider").onchange = fillFromProvider;
+  $("set-found").onchange = function () { $("set-model").value = this.value; };
+  $("settings-modal").addEventListener("click", function (e) {
+    if (e.target === this) { closeSettings(); }
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") { closeSettings(); }
+  });
+}
+
 function initMenuEvents() {
   var ev = window.__TAURI__ && window.__TAURI__.event;
   if (!ev || !ev.listen) { return; }
@@ -366,6 +511,7 @@ function initMenuEvents() {
     if (a === "refresh") { tick(); }
     else if (a === "reload") { location.reload(); }
     else if (a === "about") { showAbout(); }
+    else if (a === "settings") { openSettings(); }
     else if (a === "lang:zh") { syncLang("zh"); refresh(); }
     else if (a === "lang:en") { syncLang("en"); refresh(); }
   }).catch(function () {});
@@ -374,6 +520,7 @@ function initMenuEvents() {
 initLangToggle();
 initActions();
 initAbout();
+initSettings();
 initMenuEvents();
 invoke("app_version").then(function (v) { APP_VER = v; }).catch(function () {});
 // 窗口以 visible:false 启动：首帧渲染完成后亮相，启动动画随之播放。
