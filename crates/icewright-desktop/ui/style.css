@@ -48,7 +48,9 @@ aside { width: 240px; border-right: 1px solid var(--line); padding: 16px; displa
 #ws-list li.hint { cursor: default; opacity: .6; }
 #ws-list li.hint:hover { background: transparent; transform: none; }
 .hint { font-size: 12px; opacity: .65; line-height: 1.5; }
-main { flex: 1; padding: 20px 24px; overflow-y: auto; }
+main { flex: 1; padding: 0 24px 20px; overflow-y: auto; }
+/* 顶部留白移到 header 自身：滚动容器 padding-top 会在钉住的表头上方留出漏内容的缝隙 */
+#detail > header { margin-top: 18px; }
 .empty { opacity: .6; margin-top: 40vh; text-align: center; }
 .hidden { display: none; }
 header h2 { margin: 0 0 4px; }
@@ -221,7 +223,10 @@ tr.stale td { opacity: .55; }
 /* ---------- 可折叠分区（details/summary） ---------- */
 details.sec { margin-bottom: 4px; }
 details.sec > summary { cursor: pointer; list-style: none; user-select: none;
-  display: flex; align-items: center; gap: 6px; }
+  display: flex; align-items: center; gap: 6px;
+  position: sticky; top: 0; z-index: 3; height: 32px; box-sizing: border-box;
+  background: Canvas; border: 1px solid var(--line); border-radius: 8px;
+  padding: 0 10px; margin: 12px 0 8px; font-weight: 600; font-size: 13px; }
 details.sec > summary::-webkit-details-marker { display: none; }
 details.sec > summary::before { content: "\25B8"; font-size: 10px; opacity: .7;
   transition: transform .15s ease; }
@@ -229,7 +234,7 @@ details.sec[open] > summary::before { transform: rotate(90deg); }
 details.sec > summary:hover { opacity: .85; }
 
 /* ---------- 表头锁定：main 滚动时阶段表头钉在顶部 ---------- */
-table.stages thead th { position: sticky; top: 0; z-index: 2; background: Canvas; }
+table.stages thead th { position: sticky; top: 31px; z-index: 2; background: Canvas; }
 table.stages thead th::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0;
   border-bottom: 1px solid var(--line); }
 
