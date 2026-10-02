@@ -182,7 +182,9 @@ impl Kind {
                  3. required_fields、preconditions 中出现的 FLD-*、input_map/output_map 值里的 FLD-*，\
                  一律只允许字典白名单内已定义的字段，不得引用未定义字段。\n\
                  4. rule_refs 只列确实作用于本技能的白名单 R-*；没有依据就不写。\n\
-                 5. status 一律输出 pending——技能是否生效由人工在闸门A确认，模型无权确认。",
+                 5. status 一律输出 pending——技能是否生效由人工在闸门A确认，模型无权确认。\n\
+                 6. 客户给的技能/话术描述只是意图归纳的参考，不得照抄为规范：\
+                 每条 intent 必须写成能约束 agent 的口径——明确触发条件、适用边界与不应触发的反例。",
             ),
         };
         Ok(format!(
