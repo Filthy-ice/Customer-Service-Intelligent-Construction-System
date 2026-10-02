@@ -38,7 +38,7 @@ var DICT = {
       about_desc: "S1–S8 流水线构建器：把行业规则与流程交给 AI，产出可交付的客服系统。",
       about_github: "GitHub 主页",
       about_close: "关闭",
-      settings: "设置",
+      model_settings: "模型设置",
       set_provider: "供应商",
       set_base: "接入点 Base URL",
       set_model: "模型名",
@@ -52,17 +52,9 @@ var DICT = {
       set_saved: "已保存到本工作区 icewright.toml",
       set_discovering: "发现中…",
       set_pick_ws: "先在左侧选择工作区",
-      tab_model: "模型接入",
-      tab_lang: "语言",
-      tab_theme: "外观",
-      lang_label: "界面语言",
-      lang_auto: "自动跟随工作区",
-      lang_hint: "未手动选择时界面语种跟随 workspace.locale；手动选择后跨重启记忆。",
-      theme_label: "主题",
-      theme_auto: "跟随系统",
-      theme_light: "浅色",
-      theme_dark: "深色",
-      theme_hint: "主题即时生效并跨重启记忆；跟随系统时随操作系统深浅色自动切换。",
+      opened_corpus: "已在文件管理器中打开语料目录",
+      opened_output: "已在文件管理器中打开生成目录",
+      export_hint: "在「生成项目」页的导出行填写客户可见目录（如 ~/桌面/客服交付），点「导出交付」",
       ws_create: "新建",
       ws_id_ph: "新工作区 ID",
       ws_created: "已创建工作区 {0}：选中后点「初始化」启动管线",
@@ -142,7 +134,7 @@ var DICT = {
       about_desc: "S1-S8 pipeline builder: hand industry rules and flows to the AI, get a deliverable customer-service system back.",
       about_github: "GitHub Homepage",
       about_close: "Close",
-      settings: "Settings",
+      model_settings: "Model settings",
       set_provider: "Provider",
       set_base: "Base URL",
       set_model: "Model",
@@ -156,17 +148,9 @@ var DICT = {
       set_saved: "Saved to this workspace's icewright.toml",
       set_discovering: "Discovering…",
       set_pick_ws: "Pick a workspace on the left first",
-      tab_model: "Model",
-      tab_lang: "Language",
-      tab_theme: "Appearance",
-      lang_label: "UI language",
-      lang_auto: "Follow workspace locale",
-      lang_hint: "Without a manual choice the UI language follows workspace.locale; a manual choice persists across restarts.",
-      theme_label: "Theme",
-      theme_auto: "Follow system",
-      theme_light: "Light",
-      theme_dark: "Dark",
-      theme_hint: "Theme applies instantly and persists across restarts; follow-system tracks the OS light/dark setting.",
+      opened_corpus: "Corpus folder opened in the file manager",
+      opened_output: "Output folder opened in the file manager",
+      export_hint: "In the Generated project tab, fill a customer-visible folder (e.g. ~/Desktop/cs-delivery) in the export row and click Export delivery",
       ws_create: "Create",
       ws_id_ph: "New workspace id",
       ws_created: "Workspace {0} created: select it and click Init to start the pipeline",
@@ -223,23 +207,19 @@ var lang = langPref || "zh";
 function pushMenuLang(l) {
   try { invoke("set_menu_lang", { lang: l }).catch(function () {}); } catch (e) { /* 非 Tauri 环境 */ }
 }
+// 把 语言/主题 偏好同步给原生菜单栏，勾选项才能反映当前生效值。
+function langIdx() { return langPref === null ? 0 : (langPref === "en" ? 2 : 1); }
+function themeIdx() { return themePref === "light" ? 1 : (themePref === "dark" ? 2 : 0); }
+function syncPrefs() {
+  try { invoke("sync_prefs", { lang: langIdx(), theme: themeIdx() }).catch(function () {}); } catch (e) { /* 非 Tauri 环境 */ }
+}
 function syncLang(l) {
   lang = l;
   langPref = l;
   try { localStorage.setItem("iw-lang", l); } catch (e) { /* 隐私模式下忽略 */ }
   applyStatic();
-  renderLangToggle();
   pushMenuLang(l);
-}
-function renderLangToggle() {
-  $("lang-zh").classList.toggle("active", lang === "zh");
-  $("lang-en").classList.toggle("active", lang === "en");
-}
-function initLangToggle() {
-  $("lang-zh").onclick = function () { syncLang("zh"); refresh(); };
-  $("lang-en").onclick = function () { syncLang("en"); refresh(); };
-  applyStatic();
-  renderLangToggle();
+  syncPrefs();
 }
 function L() { return DICT[lang] || DICT.zh; }
 function U(key) {
@@ -278,6 +258,7 @@ function setTheme(t) {
     else { localStorage.setItem("iw_theme", t); }
   } catch (e) { /* 隐私模式 */ }
   applyTheme();
+  syncPrefs();
 }
 applyTheme();
 
@@ -746,8 +727,8 @@ async function refresh() {
   if (next !== lang) {
     lang = next;
     applyStatic();
-    renderLangToggle();
     pushMenuLang(next);
+    syncPrefs();
   }
   var st = await invoke("pipeline_status", { wsId: selected });
   $("empty").classList.add("hidden");
@@ -842,8 +823,6 @@ function fillFromProvider() {
 }
 
 function openSettings() {
-  showSettingsTab("model");
-  syncSettingRadios();
   if (!selected) {
     $("set-status").textContent = U("set_pick_ws");
     $("settings-modal").classList.remove("hidden");
@@ -898,37 +877,17 @@ function saveModel() {
   }).catch(function (err) { $("set-status").textContent = setErr(err); });
 }
 
-/* ---------- 设置标签页与语言/外观面板 ---------- */
-function showSettingsTab(t) {
-  ["model", "lang", "theme"].forEach(function (k) {
-    $("tab-" + k).classList.toggle("active", k === t);
-    $("pane-" + k).classList.toggle("hidden", k !== t);
-  });
-  // 保存只对模型接入有意义；语言/外观单选即时生效。
-  $("set-save").classList.toggle("hidden", t !== "model");
-  $("set-status").textContent = "";
-}
-
-function eachRadio(name, fn) {
-  Array.prototype.forEach.call(document.getElementsByName(name), fn);
-}
-
-function syncSettingRadios() {
-  var cur = langPref || "auto";
-  eachRadio("pref-lang", function (r) { r.checked = r.value === cur; });
-  eachRadio("pref-theme", function (r) { r.checked = r.value === themePref; });
-}
-
+/* ---------- 语言偏好：菜单栏子菜单驱动，auto 时回落到 workspace.locale ---------- */
 function setLangPref(p) {
   if (p === "auto") {
     langPref = null;
     try { localStorage.removeItem("iw-lang"); } catch (e) { /* 隐私模式 */ }
+    syncPrefs();
     if (selected) {
       refresh();
     } else {
       lang = "zh";
       applyStatic();
-      renderLangToggle();
       pushMenuLang(lang);
     }
   } else {
@@ -937,26 +896,12 @@ function setLangPref(p) {
   }
 }
 
-function initSettingsPanes() {
-  ["model", "lang", "theme"].forEach(function (k) {
-    $("tab-" + k).onclick = function () { showSettingsTab(k); };
-  });
-  eachRadio("pref-lang", function (r) {
-    r.onchange = function () { if (r.checked) { setLangPref(r.value); } };
-  });
-  eachRadio("pref-theme", function (r) {
-    r.onchange = function () { if (r.checked) { setTheme(r.value); } };
-  });
-}
-
 function initSettings() {
-  $("open-settings").onclick = openSettings;
   $("set-close").onclick = closeSettings;
   $("set-save").onclick = saveModel;
   $("set-discover").onclick = discoverModels;
   $("set-provider").onchange = fillFromProvider;
   $("set-found").onchange = function () { $("set-model").value = this.value; };
-  initSettingsPanes();
   $("settings-modal").addEventListener("click", function (e) {
     if (e.target === this) { closeSettings(); }
   });
@@ -971,6 +916,13 @@ function menuNote(text) {
   var res = $("op-result");
   res.classList.remove("hidden");
   res.textContent = text;
+}
+
+function menuOpenDir(cmd, doneKey) {
+  if (!selected) { menuNote("✘ " + U("set_pick_ws")); return; }
+  invoke(cmd, { wsId: selected })
+    .then(function () { menuNote("✔ " + U(doneKey)); })
+    .catch(function (err) { menuNote("✘ " + fmt(U("open_dir_fail"), [err])); });
 }
 
 function initMenuEvents() {
@@ -991,10 +943,22 @@ function initMenuEvents() {
     }
     else if (a === "lang:zh") { syncLang("zh"); refresh(); }
     else if (a === "lang:en") { syncLang("en"); refresh(); }
+    else if (a === "lang:auto") { setLangPref("auto"); }
+    else if (a === "theme:auto" || a === "theme:light" || a === "theme:dark") {
+      setTheme(a.slice("theme:".length));
+    }
+    else if (a === "open_corpus") { menuOpenDir("open_corpus_dir", "opened_corpus"); }
+    else if (a === "open_output") { menuOpenDir("open_output_dir", "opened_output"); }
+    else if (a === "export") {
+      showViewTab("output");
+      menuNote("ℹ " + U("export_hint"));
+      try { $("export-dest").focus(); } catch (e) { /* 非 Tauri 环境 */ }
+    }
   }).catch(function () {});
 }
 
-initLangToggle();
+applyStatic();
+syncPrefs();
 initAside();
 initWsCreate();
 initViewTabs();

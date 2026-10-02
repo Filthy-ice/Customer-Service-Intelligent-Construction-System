@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=IceWright Desktop
+GenericName=AI Builder
+Comment=S1–S8 pipeline builder for customer-service systems
+Exec=%EXEC%
+Icon=%ICON%
+Terminal=false
+Categories=Development;
+StartupWMClass=icewright-desktop

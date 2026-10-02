@@ -25,6 +25,8 @@ aside { width: 240px; border-right: 1px solid var(--line); padding: 16px; displa
 .icon-btn:hover { background: #8882; }
 .layout.collapsed aside { width: 56px; padding: 12px 8px; }
 .layout.collapsed aside > :not(.aside-head), .layout.collapsed .aside-head h1 { display: none; }
+/* #ws-list 的 display:flex 是 ID 选择器，会盖过上面的收起规则——单独点名，否则项目名溢出 56px 窄栏 */
+.layout.collapsed #ws-list { display: none; }
 .layout.collapsed .aside-head { justify-content: center; }
 .ws-new { display: flex; gap: 4px; }
 .ws-new input { flex: 1; min-width: 0; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px;
@@ -35,7 +37,7 @@ aside { width: 240px; border-right: 1px solid var(--line); padding: 16px; displa
 .ws-note { font-size: 11.5px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
 .section-title { font-size: 12px; opacity: .7; text-transform: uppercase; }
 #ws-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-#ws-list li { padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+#ws-list li { padding: 8px 10px; border-radius: 8px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #ws-list li:hover { background: #8882; }
 #ws-list li.active { background: var(--accent); color: #fff; }
 .hint { font-size: 12px; opacity: .65; line-height: 1.5; }
@@ -50,10 +52,6 @@ header h2 { margin: 0 0 4px; }
         padding: 6px 4px; }
 .step b { font-size: 13px; }
 .step .nm { font-size: 10px; opacity: .75; text-align: center; line-height: 1.25; }
-.lang-toggle { display: flex; gap: 4px; margin-bottom: 4px; }
-.lang-toggle button { border: 1px solid var(--line); background: transparent; border-radius: 6px;
-  padding: 2px 12px; cursor: pointer; font-family: inherit; font-size: 12px; opacity: .7; }
-.lang-toggle button.active { background: var(--accent); color: #fff; border-color: var(--accent); opacity: 1; }
 .step.approved { background: #16a34a22; border-color: #16a34a88; }
 .step.running { background: var(--accent); color: #fff; border-color: var(--accent); animation: step-pulse 1.6s ease-in-out infinite; }
 @keyframes step-pulse {
@@ -96,7 +94,7 @@ h3 { margin: 12px 0 8px; font-size: 14px; }
 @keyframes rise-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 #detail:not(.hidden) { animation: rise-in .25s ease both; }
 #op-result:not(.hidden) { animation: rise-in .2s ease both; }
-#ws-list li, .lang-toggle button { transition: background .12s ease, color .12s ease, transform .12s ease; }
+#ws-list li { transition: background .12s ease, color .12s ease, transform .12s ease; }
 #ws-list li:hover { transform: translateX(2px); }
 /* 关于对话框 */
 .modal { position: fixed; inset: 0; background: #0006; display: flex; align-items: center; justify-content: center; z-index: 50; }
@@ -118,7 +116,7 @@ h3 { margin: 12px 0 8px; font-size: 14px; }
 .about-actions button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
 @media (prefers-reduced-motion: reduce) {
   body, #detail, #op-result, .modal-card, .step.running { animation: none; }
-  #op-buttons button, .about-actions button, #ws-list li, .lang-toggle button { transition: none; }
+  #op-buttons button, .about-actions button, #ws-list li { transition: none; }
 }
 /* 模型设置面板 */
 .link-btn { align-self: flex-start; border: 1px solid var(--line); background: transparent; color: inherit;
@@ -134,14 +132,7 @@ h3 { margin: 12px 0 8px; font-size: 14px; }
 .set-row button { flex: none; padding: 5px 12px; border: 1px solid var(--accent); color: var(--accent);
   background: transparent; border-radius: 6px; font-family: inherit; font-size: 12.5px; cursor: pointer; }
 .set-hint { font-size: 11px; opacity: .6; line-height: 1.5; }
-.set-status { font-size: 12px; min-height: 18px; color: var(--warn); white-space: pre-wrap; }/* 设置标签页：模型接入 / 语言 / 外观 */
-.set-tabs { display: flex; gap: 4px; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
-.set-tabs button { flex: 1; padding: 6px 4px; border: 1px solid var(--line); background: transparent; color: inherit;
-  border-radius: 6px; font-family: inherit; font-size: 12.5px; cursor: pointer; }
-.set-tabs button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
-.pane-label { font-size: 12px; opacity: .7; margin: 2px 0 4px; }
-.radio-group { display: flex; flex-direction: column; gap: 6px; margin: 2px 0 8px; }
-.radio-group label { display: flex; align-items: center; gap: 8px; font-size: 13px; margin: 0; opacity: 1; }
+.set-status { font-size: 12px; min-height: 18px; color: var(--warn); white-space: pre-wrap; }
 @media (prefers-reduced-motion: reduce) {
   aside { transition: none; }
 }
