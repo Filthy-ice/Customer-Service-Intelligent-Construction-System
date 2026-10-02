@@ -129,6 +129,12 @@ enum CorpusAction {
     },
     /// 列出已入库语料（分类/文件名 + 字节数，与桌面「需求语料」面板同一视图）
     List { ws: String },
+    /// 查看/设定模型操作语言（zh|en）：与界面语言解耦，决定发给模型的提示词语种与生成物默认语种；需求摄入时（pipeline init 前）必须由客户显式选定
+    Lang {
+        ws: String,
+        /// zh 或 en；留空只查看当前值
+        lang: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -348,6 +354,24 @@ fn cmd_corpus(action: &CorpusAction) -> Result<()> {
                 )
             );
         }
+        CorpusAction::Lang { ws, lang } => {
+            let ws = open_ws(ws)?;
+            match lang {
+                Some(l) => {
+                    ws.set_model_lang(l)?;
+                    let saved = ws.config()?.workspace.model_lang;
+                    println!("{}", tf("corpus_lang_set", &[("lang", &saved)]));
+                }
+                None => {
+                    let cur = ws.config()?.workspace.model_lang;
+                    if cur.is_empty() {
+                        println!("{}", tf("corpus_lang_none", &[("ws", &ws.id)]));
+                    } else {
+                        println!("{}", tf("corpus_lang_show", &[("lang", &cur)]));
+                    }
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -378,6 +402,8 @@ fn cmd_pipeline_init(ws_id: &str) -> Result<()> {
             tf("pipeline_exists", &[("path", &path.display().to_string())])
         );
     }
+    // 摄入硬闸：模型操作语言须由客户在 init 前显式选定（与界面语言解耦）
+    ws.require_model_lang()?;
     let cfg = ws.config()?;
     let date = Utc::now().format("%Y%m%d").to_string();
     let run_id = next_run_id(&ws.root, &date);
@@ -698,6 +724,8 @@ fn cmd_build(ws_id: &str) -> Result<()> {
     let ws = open_ws(ws_id)?;
     // S1：无 pipeline 时自动初始化
     if !ws.state_path().exists() {
+        // 摄入硬闸：模型操作语言须由客户在 init/build 前显式选定（与界面语言解耦）
+        ws.require_model_lang()?;
         let cfg = ws.config()?;
         let date = Utc::now().format("%Y%m%d").to_string();
         let run_id = next_run_id(&ws.root, &date);

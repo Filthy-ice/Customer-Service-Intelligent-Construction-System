@@ -9,6 +9,9 @@ name = "{name}"
 pack = ""          # 行业包引用，如 insurance/auto-claim@0.1.0
 stack = "python"   # python | java | go（三栈线格式一致，S6 按栈分派验证）
 locale = "zh"      # CLI 文案语言：zh | en（临时覆盖用环境变量 ICERIGHT_LOCALE）
+# 模型操作语言：需求摄入时由客户显式选定（`icewright corpus lang <ws> zh|en`）。
+# 与界面语言解耦、与供应商国籍无关——决定发给模型的提示词语种与生成物默认回复/话术语种。
+model_lang = ""
 #agent_framework = ""  # 覆盖生成物 agent 框架默认选型（留空用每栈默认；见设计文档候选表）
 framework_customer_confirmed = false  # Agent 基础框架选型须客户技术侧确认后方可进 S5（硬闸）
 # 交付目录：生成物直接落盘的客户可见位置（如 ~/Desktop/客服交付 或 D:\\交付）。
@@ -66,6 +69,14 @@ const CORPUS_README: &str = r#"# 语料组织约定
 
 - CLI：`icewright corpus add <ws> <文件或目录路径> --cat rules`（目录递归收全，分类缺省 other）
 - 桌面端：「需求语料」页 →「从路径导入」
+
+摄入时还须选定**模型操作语言**（pipeline init 前是硬闸，未选定拒绝初始化）：
+
+- CLI：`icewright corpus lang <ws> zh|en`
+- 桌面端：「需求语料」页顶部的模型操作语言选择器
+
+它决定引擎发给模型的提示词语种与生成物默认回复/话术语种——与软件界面语言
+解耦、与模型供应商国籍无关（中文客户可用英文操作模型，外国客户也可用国产模型）。
 
 导入后按五类产物归置（也可直接在对应子目录新建/编辑）：
 
@@ -200,6 +211,34 @@ impl Workspace {
             );
         }
         Ok(cfg)
+    }
+
+    /// 需求摄入（S1→S3）硬闸：模型操作语言必须由客户在摄入时显式选定（zh|en）。
+    /// 与界面语言 locale 解耦，与供应商国籍无关；未选定即拒绝进入提取。
+    pub fn require_model_lang(&self) -> Result<crate::i18n::ModelLang> {
+        let cfg = self.config()?;
+        let raw = cfg.workspace.model_lang.trim();
+        if raw.is_empty() {
+            bail!("{}", t!("model_lang_unset", format!("{} zh|en", self.id)));
+        }
+        if raw != "zh" && !raw.eq_ignore_ascii_case("en") {
+            bail!("{}", t!("model_lang_invalid", raw));
+        }
+        Ok(crate::i18n::ModelLang::resolve(raw))
+    }
+
+    /// 设定模型操作语言（zh|en，大小写不敏感统一小写存储）。
+    pub fn set_model_lang(&self, raw: &str) -> Result<()> {
+        let raw = raw.trim().to_lowercase();
+        if raw != "zh" && raw != "en" {
+            bail!("{}", t!("model_lang_invalid", raw));
+        }
+        config::set_and_save(
+            &self.root.join("icewright.toml"),
+            "workspace.model_lang",
+            &raw,
+        )?;
+        Ok(())
     }
 
     /// S5/S6 的落盘目录：客户已确认的交付目录。未设定或未确认都硬闸拒绝——
@@ -355,6 +394,25 @@ mod tests {
         // 换目录自动作废确认
         ws.set_delivery_dir("/srv/other").unwrap();
         assert!(ws.require_delivery_dir().is_err());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn model_lang_gate_requires_explicit_choice() {
+        let base = std::env::temp_dir().join(format!("iw-mlang-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let ws = Workspace::create_at(&base, "mlang-ws").unwrap();
+        // 摄入模板留空=未选定：硬闸拒绝，并指引 corpus lang 命令
+        let err = ws.require_model_lang().unwrap_err().to_string();
+        assert!(err.contains("corpus lang mlang-ws"), "{err}");
+        // 非法值拒绝
+        assert!(ws.set_model_lang("fr").is_err());
+        // 显式选定后放行（大小写宽松，统一小写存储）
+        ws.set_model_lang("EN").unwrap();
+        assert_eq!(ws.require_model_lang().unwrap(), crate::i18n::ModelLang::En);
+        assert_eq!(ws.config().unwrap().workspace.model_lang, "en");
+        ws.set_model_lang("zh").unwrap();
+        assert_eq!(ws.require_model_lang().unwrap(), crate::i18n::ModelLang::Zh);
         let _ = std::fs::remove_dir_all(&base);
     }
 

@@ -26,13 +26,16 @@ pub fn is_en() -> bool {
 
 const MESSAGES: &[(&str, &str, &str)] = &[
     ("ws_created", "已创建 workspace: {path}", "Workspace created: {path}"),
-    ("ws_next", "下一步：编辑 icewright.toml 配置模型与行业包；需求材料留在原处，用 `icewright corpus add <ws> <文件或目录路径>` 导入（约定见 corpus/README.md）", "Next: edit icewright.toml to configure the model and industry pack; keep requirement files where they are and import them with `icewright corpus add <ws> <file-or-folder>` (see corpus/README.md)"),
+    ("ws_next", "下一步：编辑 icewright.toml 配置模型与行业包；需求材料留在原处，用 `icewright corpus add <ws> <文件或目录路径>` 导入（约定见 corpus/README.md）；再 `icewright corpus lang <ws> zh|en` 选定模型操作语言（与界面语言解耦，init 硬闸）", "Next: edit icewright.toml to configure the model and industry pack; keep requirement files where they are and import them with `icewright corpus add <ws> <file-or-folder>` (see corpus/README.md); then pick the model operation language with `icewright corpus lang <ws> zh|en` (decoupled from UI locale; hard gate at init)"),
     ("corpus_added", "已导入 {src}：新增 {n} 个、更新 {u} 个、图片快照 {img} 张、内容相同跳过 {same} 个、非文本跳过 {bin} 个", "Imported {src}: {n} new, {u} updated, {img} image snapshot(s) stored, {same} skipped as identical, {bin} skipped as non-text"),
     ("extract_img_note", "提示：{n} 张图片语料已留档但不参与文本提取（等待视觉解析通道接入后可利用），建议同时索要 mermaid/markdown/文字步骤版流程图", "Note: {n} image corpus file(s) are archived but excluded from text extraction (usable once a vision-parsing channel is added); ask for mermaid/markdown/text flowcharts too"),
     ("corpus_img_tag", "(图片快照，待视觉解析接入)", "(image snapshot, pending vision parsing)"),
     ("corpus_add_no_paths", "请给出至少一个要导入的文件或目录路径", "Give at least one file or folder path to import"),
     ("corpus_list_empty", "corpus/ 尚无入库语料（顶层 README.md 为说明文件，不入库）：用 `icewright corpus add {ws} <文件或目录路径>` 从原处导入", "No corpus ingested yet (top-level README.md is documentation, not corpus): import files or folders in place with `icewright corpus add {ws} <file-or-folder>`"),
     ("corpus_list_total", "共 {n} 个文件、{bytes} 字节（提取时递归读取，总量有上限）", "{n} file(s), {bytes} bytes in total (read recursively at extraction; overall size is capped)"),
+    ("corpus_lang_set", "模型操作语言已设为 {lang}（决定发给模型的提示词语种与生成物默认语种，与界面语言无关）", "Model operation language set to {lang} (drives model prompts and the generated project's default language; independent of UI locale)"),
+    ("corpus_lang_show", "当前模型操作语言：{lang}（决定发给模型的提示词语种与生成物默认语种，与界面语言无关）", "Current model operation language: {lang} (drives model prompts and the generated project's default language; independent of UI locale)"),
+    ("corpus_lang_none", "尚未选定模型操作语言：需求摄入时须由客户显式选定，运行 `icewright corpus lang {ws} zh|en`（与界面语言解耦，决定模型提示词与生成物默认语种）", "Model operation language not chosen yet: the customer must pick it explicitly at intake with `icewright corpus lang {ws} zh|en` (decoupled from UI locale; it drives model prompts and the generated project's default language)"),
     ("ws_none", "（无 workspace，用 `icewright ws new <id>` 创建）", "(no workspaces — create one with `icewright ws new <id>`)"),
     ("pipeline_exists", "pipeline 已存在: {path}（重跑请先归档到 pipeline/history/）", "pipeline already exists: {path} (archive it to pipeline/history/ before rerunning)"),
     ("pipeline_inited", "已初始化 {run}（{path}）", "Initialized {run} ({path})"),
@@ -157,6 +160,7 @@ const SUB_HELP: &[(&str, &str)] = &[
     ("corpus", "requirement corpus intake: customers keep files where they are, the tool imports them by path"),
     ("corpus add", "copy customer files/folders (any location, ~/... supported) into corpus/<category>/; folders are ingested recursively, originals untouched"),
     ("corpus list", "list the ingested corpus (category/file + size, same view as the desktop corpus panel)"),
+    ("corpus lang", "view or set the model operation language (zh|en): decoupled from UI locale, it drives model prompts and the generated project's default language; the customer must pick it explicitly before pipeline init"),
     ("build", "one-shot pipeline: auto-initialize S1, advance to the next human gate (Gate A/B) and pause; rerun after approval to resume"),
     ("config", "read/write workspace config (dot keys such as model.base_url, model.key_ref)"),
     ("config show", "print the effective config (raw icewright.toml)"),
@@ -210,6 +214,11 @@ const ARG_HELP: &[(&str, &str, &str)] = &[
         "corpus add",
         "cat",
         "target category (rules/apis/flows/dictionary/skills/other); defaults to other",
+    ),
+    (
+        "corpus lang",
+        "lang",
+        "zh or en; omit to only view the current value",
     ),
     (
         "delivery set",

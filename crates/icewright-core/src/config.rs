@@ -19,6 +19,10 @@ pub struct WorkspaceCfg {
     pub stack: String,
     /// CLI 文案语言：zh | en（空或未识别值由调用方回退 zh）
     pub locale: String,
+    /// 模型操作语言：zh | en（空=摄入时尚未选择）。与界面语言 locale 解耦——
+    /// 由客户在需求摄入时选定，决定引擎发给模型的提示词语种与生成物默认回复语言；
+    /// 供应商国籍与它无关（中文客户可用英文操作，外国客户可用阿里模型）。
+    pub model_lang: String,
     /// 生成物 Agent 框架覆盖（空=用每栈默认；值须命中该栈候选，见 frameworks::resolve）
     pub agent_framework: String,
     /// Agent 基础框架选型是否已获客户技术侧确认（false 时 S5 拒绝生成；其余中间件无需核对）
@@ -38,6 +42,8 @@ impl Default for WorkspaceCfg {
             pack: String::new(),
             stack: String::new(),
             locale: "zh".to_string(),
+            // 空=摄入时尚未选择；强制客户在需求摄入时显式选定 zh/en，不给隐式默认
+            model_lang: String::new(),
             agent_framework: String::new(),
             framework_customer_confirmed: false,
             delivery_dir: String::new(),
@@ -157,6 +163,7 @@ mod tests {
         let cfg: Config = toml::from_str(&template).unwrap();
         assert_eq!(cfg.workspace.stack, "python");
         assert_eq!(cfg.workspace.locale, "zh");
+        assert!(cfg.workspace.model_lang.is_empty());
         assert!(cfg.model.key_ref.is_empty());
     }
 
@@ -174,6 +181,8 @@ mod tests {
         assert_eq!(cfg.model.base_url, "https://api.example.com/v1");
         let cfg = set_and_save(&p, "workspace.locale", "en").unwrap();
         assert_eq!(cfg.workspace.locale, "en");
+        let cfg = set_and_save(&p, "workspace.model_lang", "en").unwrap();
+        assert_eq!(cfg.workspace.model_lang, "en");
         assert!(set_and_save(&p, "model.unknown_key", "x").is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }

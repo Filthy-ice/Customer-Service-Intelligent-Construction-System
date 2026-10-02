@@ -597,6 +597,14 @@ async fn model_set(
     .map_err(|e| format!("模型配置保存任务崩溃: {e}"))?
 }
 
+/// 设定模型操作语言（zh|en）：读盘写盘走 spawn_blocking 避免卡 UI。
+#[tauri::command]
+async fn model_lang_set(ws_id: String, lang: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || ops::model_lang_set(&ws_id, &lang))
+        .await
+        .map_err(|e| format!("模型语言保存任务崩溃: {e}"))?
+}
+
 /// 在线发现是阻塞 HTTP 调用，放 spawn_blocking 避免卡 UI 线程。
 #[tauri::command]
 async fn model_discover(base_url: String, key_ref: Option<String>) -> Result<Vec<String>, String> {
@@ -697,6 +705,7 @@ fn main() {
             model_providers,
             model_get,
             model_set,
+            model_lang_set,
             model_discover
         ])
         .setup(|app| {

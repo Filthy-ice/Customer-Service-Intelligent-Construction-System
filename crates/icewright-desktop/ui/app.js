@@ -79,6 +79,10 @@ var DICT = {
       corpus_import_bin: "（{0} 个非文本已跳过）",
       corpus_edit_ph: "在此编写或粘贴需求文本（markdown / 纯文本）",
       corpus_save: "保存语料",
+      model_lang_label: "模型操作语言",
+      model_lang_none: "未选择",
+      model_lang_hint: "决定发给模型的提示词语种与生成物默认回复语种；与界面语言、供应商国籍无关。初始化管线前必须选定。",
+      model_lang_saved: "已设为 {0}（与界面语言无关）",
       output_files: "生成文件",
       output_edit_ph: "点左侧文件查看，可直接编辑后保存",
       output_save: "保存修改",
@@ -188,6 +192,10 @@ var DICT = {
       corpus_import_bin: "({0} non-text file(s) skipped)",
       corpus_edit_ph: "Write or paste requirement text here (markdown / plain text)",
       corpus_save: "Save corpus",
+      model_lang_label: "Model language",
+      model_lang_none: "Not chosen",
+      model_lang_hint: "Drives the language of prompts sent to the model and the generated project's default reply language; independent of UI locale and vendor country. Must be picked before pipeline init.",
+      model_lang_saved: "Set to {0} (independent of UI locale)",
       output_files: "Generated files",
       output_edit_ph: "Pick a file on the left to view; edit directly and save",
       output_save: "Save edits",
@@ -572,6 +580,7 @@ var corpusRel = null, corpusBase = "";
 var outRel = null, outBase = "";
 var catsLoaded = false;
 var importing = false;          // 语料导入进行中标记（防连点）
+var mlangCur = "";              // 当前工作区已选定的模型操作语言（""=未选）
 
 function panelStatus(id, msg) { $(id).textContent = msg; }
 
@@ -617,6 +626,10 @@ async function loadCorpus() {
   try {
     var paths = await invoke("ws_paths", { wsId: selected });
     $("corpus-dir").textContent = paths.corpus;
+    mlangCur = paths.model_lang || "";
+    var ms = $("corpus-mlang");
+    ms.value = mlangCur;
+    ms.title = U("model_lang_hint");
     if (!catsLoaded) {
       var cats = await invoke("corpus_cats");
       var sel = $("corpus-cat");
@@ -699,6 +712,29 @@ function importCorpus() {
     })
     .catch(function (err) { panelStatus("corpus-status", "✘ " + setErr(err)); })
     .then(function () { importing = false; btn.disabled = false; });
+}
+
+// 模型操作语言：摄入时由客户选定（init 硬闸），与界面语言、供应商国籍无关。
+function saveModelLang() {
+  if (!selected) { panelStatus("corpus-mlang-status", "✘ " + U("set_pick_ws")); return; }
+  var sel = $("corpus-mlang");
+  var lang = sel.value;
+  if (!lang) {
+    // 「未选择」只是占位项：回退到当前值，不写空
+    sel.value = mlangCur;
+    panelStatus("corpus-mlang-status", "");
+    return;
+  }
+  invoke("model_lang_set", { wsId: selected, lang: lang })
+    .then(function (saved) {
+      mlangCur = saved;
+      sel.value = saved;
+      panelStatus("corpus-mlang-status", "✔ " + fmt(U("model_lang_saved"), [saved]));
+    })
+    .catch(function (err) {
+      sel.value = mlangCur;
+      panelStatus("corpus-mlang-status", "✘ " + setErr(err));
+    });
 }
 
 function saveCorpus() {
@@ -813,6 +849,7 @@ function initViewTabs() {
   });
   $("corpus-save").onclick = saveCorpus;
   $("corpus-open").onclick = function () { openDir("open_corpus_dir", "corpus-status"); };
+  $("corpus-mlang").onchange = saveModelLang;
   $("output-save").onclick = saveOutput;
   $("output-open").onclick = function () { openDir("open_output_dir", "output-status"); };
   $("delivery-go").onclick = confirmDelivery;

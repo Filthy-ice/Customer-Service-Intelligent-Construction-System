@@ -25,6 +25,8 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ("delivery_unconfirmed", "交付目录尚未获客户确认，禁止生成：确认去向后再 {0}", "delivery folder not yet confirmed by the customer, generation blocked: confirm it first, then {0}"),
     ("delivery_not_abs", "交付目录必须是绝对路径（或 ~/ 开头）: {0}", "delivery folder must be an absolute path (or start with ~/): {0}"),
     ("delivery_empty", "交付目录不能为空", "delivery folder must not be empty"),
+    ("model_lang_unset", "尚未选定模型操作语言：需求摄入时须由客户显式选定（与界面语言解耦，决定发给模型的提示词与生成物默认语种），运行 `icewright corpus lang {0} zh|en`", "model operation language not yet chosen: the customer must pick it explicitly at requirement intake (decoupled from UI locale; it drives model prompts and the generated project's default language) — run `icewright corpus lang {0} zh|en`"),
+    ("model_lang_invalid", "模型操作语言只允许 zh 或 en，收到: {0}", "model operation language allows only zh or en, got: {0}"),
     ("model_not_json", "模型端点返回的不是合法 JSON", "model endpoint returned invalid JSON"),
     ("model_no_content", "响应缺少 choices[0].message.content", "response missing choices[0].message.content"),
     ("secret_keyring_format", "格式应为 keyring://<service>/<account>", "expected format keyring://<service>/<account>"),
@@ -86,6 +88,44 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
 
 static LANG: AtomicU8 = AtomicU8::new(0); // 0=zh 1=en
 
+/// 模型操作语言：需求摄入时由客户选定（workspace.model_lang），与界面文案语种 locale 解耦——
+/// 供应商国籍与用户国籍互不绑定（国人可要求英文操作，外国人可用阿里模型）。
+/// 决定引擎发给模型的提示词语种，以及生成物默认回复/话术语种。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelLang {
+    Zh,
+    En,
+}
+
+impl ModelLang {
+    /// 宽松解析：仅 "en"（不分大小写）算英文，其余（含未设置的空串）算中文。
+    /// 真实流程里 init 硬闸保证已显式选定；单测直接驱动 run() 时回退中文。
+    pub fn resolve(raw: &str) -> Self {
+        if raw.eq_ignore_ascii_case("en") {
+            ModelLang::En
+        } else {
+            ModelLang::Zh
+        }
+    }
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ModelLang::Zh => "zh",
+            ModelLang::En => "en",
+        }
+    }
+    pub fn is_en(self) -> bool {
+        self == ModelLang::En
+    }
+    /// 双语取词：模型侧文本一律走这里，按客户选定的操作语言出稿。
+    pub fn pick<'a>(self, zh: &'a str, en: &'a str) -> &'a str {
+        if self.is_en() {
+            en
+        } else {
+            zh
+        }
+    }
+}
+
 pub fn set_lang(locale: &str) {
     LANG.store(
         if locale.eq_ignore_ascii_case("en") {
@@ -144,6 +184,17 @@ pub(crate) mod tests {
     use std::sync::Mutex;
 
     pub(crate) static LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn model_lang_resolve_and_pick() {
+        assert_eq!(ModelLang::resolve(""), ModelLang::Zh);
+        assert_eq!(ModelLang::resolve("zh"), ModelLang::Zh);
+        assert_eq!(ModelLang::resolve("en"), ModelLang::En);
+        assert_eq!(ModelLang::resolve("EN"), ModelLang::En);
+        assert_eq!(ModelLang::Zh.pick("白名单", "whitelist"), "白名单");
+        assert_eq!(ModelLang::En.pick("白名单", "whitelist"), "whitelist");
+        assert_eq!(ModelLang::En.as_str(), "en");
+    }
 
     fn placeholders(s: &str) -> Vec<usize> {
         let mut out = Vec::new();

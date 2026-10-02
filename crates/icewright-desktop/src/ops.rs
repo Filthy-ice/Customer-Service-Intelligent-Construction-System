@@ -115,6 +115,8 @@ pub struct WorkspacePaths {
     pub delivery_dir: String,
     /// 交付目录是否已由客户确认（未确认时 S5 拒绝生成）
     pub delivery_confirmed: bool,
+    /// 模型操作语言（空=摄入时尚未选定，init 硬闸拒绝）
+    pub model_lang: String,
 }
 
 fn seg_ok(seg: &str) -> bool {
@@ -195,6 +197,7 @@ pub fn ws_paths(ws_id: &str) -> Result<WorkspacePaths, String> {
         output: ws.artifact_browse_dir().display().to_string(),
         delivery_dir: cfg.workspace.delivery_dir.trim().to_string(),
         delivery_confirmed: cfg.workspace.delivery_customer_confirmed,
+        model_lang: cfg.workspace.model_lang.trim().to_string(),
     })
 }
 
@@ -385,6 +388,14 @@ pub fn model_set(ws_id: &str, base_url: &str, model: &str, key_ref: &str) -> Res
     Ok(())
 }
 
+/// 设定模型操作语言（zh|en，摄入硬闸的界面入口）；非法值由引擎报错（已双语）。
+/// 返回实际存下的规范化值，供前端做可感知回执。
+pub fn model_lang_set(ws_id: &str, lang: &str) -> Result<String, String> {
+    let ws = open(ws_id)?;
+    ws.set_model_lang(lang).map_err(e2s)?;
+    Ok(ws.config().map_err(e2s)?.workspace.model_lang)
+}
+
 /// 在线发现可用模型：优先用给定 key_ref 解出密钥，否则按目录里同接入点的
 /// key_envs 候选逐个取环境变量（与 CLI discover 同策略）。
 pub fn model_discover(base_url: &str, key_ref: Option<&str>) -> Result<Vec<String>, String> {
@@ -426,6 +437,8 @@ fn ws_init(ws_id: &str) -> Result<String, String> {
     if path.exists() {
         return Err("pipeline 已存在（重跑请先归档 state.json）".to_string());
     }
+    // 摄入硬闸：模型操作语言须由客户显式选定（与界面语言解耦），引擎报错已双语
+    let ml = ws.require_model_lang().map_err(e2s)?;
     let cfg = ws.config().map_err(e2s)?;
     let date = Utc::now().format("%Y%m%d").to_string();
     let run_id = next_run_id(&ws.root, &date);
@@ -437,7 +450,7 @@ fn ws_init(ws_id: &str) -> Result<String, String> {
     let st = state::PipelineState::new(ws_id, &run_id, pack);
     state::save_state(&path, &st).map_err(e2s)?;
     history::record(&ws, "S1", &format!("管线初始化 run={run_id}")).map_err(e2s)?;
-    Ok(format!("已初始化 {run_id}"))
+    Ok(format!("已初始化 {run_id}（模型操作语言 {}）", ml.as_str()))
 }
 
 fn run_preflight(ws_id: &str) -> Result<String, String> {
@@ -642,6 +655,10 @@ mod tests {
         // 新 workspace：init 前 dispatch 报「不存在」
         assert!(dispatch("init", "live-e2e", None).is_err());
         Workspace::create("live-e2e").unwrap();
+        // 摄入硬闸：未选定模型操作语言时 init 拒绝，并指引 corpus lang 命令
+        let err = dispatch("init", "live-e2e", None).unwrap_err();
+        assert!(err.contains("corpus lang live-e2e"), "{err}");
+        model_lang_set("live-e2e", "zh").unwrap();
         let out = dispatch("init", "live-e2e", None).unwrap();
         assert!(out.starts_with("已初始化 run-"), "{out}");
         // 重复 init 被状态机拒绝
@@ -885,6 +902,7 @@ mod tests {
         std::env::set_var("HOME", &home);
 
         ws_create("ext-ws").unwrap();
+        model_lang_set("ext-ws", "zh").unwrap();
         // 未初始化 → need_init；已初始化但 S2 未批 → s2_not_approved（都不碰模型）
         assert_eq!(
             dispatch("extract", "ext-ws", None).unwrap_err(),

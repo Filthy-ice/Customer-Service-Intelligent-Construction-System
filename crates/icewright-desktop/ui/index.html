@@ -54,6 +54,15 @@
             <span class="pane-path" id="corpus-dir"></span>
             <button id="corpus-open" class="link-btn" type="button" data-i18n="open_in_folder">在文件夹中打开</button>
           </div>
+          <div class="mlang-bar">
+            <span class="sec-label" data-i18n="model_lang_label">模型操作语言</span>
+            <select id="corpus-mlang">
+              <option value="" data-i18n="model_lang_none">未选择</option>
+              <option value="zh">中文</option>
+              <option value="en">English</option>
+            </select>
+            <span id="corpus-mlang-status" class="edit-status"></span>
+          </div>
           <div class="file-split">
             <div class="file-side">
               <div class="sec-label"><span data-i18n="corpus_files">语料文件</span><span class="count" id="corpus-count"></span></div>
