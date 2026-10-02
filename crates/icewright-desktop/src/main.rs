@@ -253,49 +253,67 @@ fn apply_menu(app: &tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+// 文件读类命令一律 async + spawn_blocking：Tauri v2 的同步命令在主线程执行，
+// 每次读盘都会冻住 GTK 事件循环（工作区切换卡顿的根因）。
 #[tauri::command]
-fn ws_list() -> Result<Vec<String>, String> {
-    Workspace::list().map_err(|e| e.to_string())
+async fn ws_list() -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(|| Workspace::list().map_err(|e| e.to_string()))
+        .await
+        .map_err(|e| format!("工作区列表任务崩溃: {e}"))?
 }
 
 /// 界面上直接创建工作区（与 CLI ws new 同一引擎入口，ID 校验/重名报错由引擎负责）。
 #[tauri::command]
-fn ws_create(ws_id: String) -> Result<String, String> {
-    ops::ws_create(&ws_id)
+async fn ws_create(ws_id: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || ops::ws_create(&ws_id))
+        .await
+        .map_err(|e| format!("工作区创建任务崩溃: {e}"))?
 }
 
 /// 某 workspace 的完整 pipeline 状态；尚未 init 时返回 None（UI 显示引导文案）。
 #[tauri::command]
-fn pipeline_status(ws_id: String) -> Result<Option<state::PipelineState>, String> {
-    let ws = Workspace::open(&ws_id).map_err(|e| e.to_string())?;
-    let path = ws.state_path();
-    if !path.exists() {
-        return Ok(None);
-    }
-    state::load_state(&path)
-        .map(Some)
-        .map_err(|e| e.to_string())
+async fn pipeline_status(ws_id: String) -> Result<Option<state::PipelineState>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let ws = Workspace::open(&ws_id).map_err(|e| e.to_string())?;
+        let path = ws.state_path();
+        if !path.exists() {
+            return Ok(None);
+        }
+        state::load_state(&path)
+            .map(Some)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| format!("状态读取任务崩溃: {e}"))?
 }
 
 /* ---------- 需求语料与生成物（corpus/ 与 output/）：GUI 内查看编辑，无需回命令行 ---------- */
 #[tauri::command]
-fn ws_paths(ws_id: String) -> Result<ops::WorkspacePaths, String> {
-    ops::ws_paths(&ws_id)
+async fn ws_paths(ws_id: String) -> Result<ops::WorkspacePaths, String> {
+    tauri::async_runtime::spawn_blocking(move || ops::ws_paths(&ws_id))
+        .await
+        .map_err(|e| format!("路径读取任务崩溃: {e}"))?
 }
 
 #[tauri::command]
-fn corpus_list(ws_id: String) -> Result<Vec<ops::WsFile>, String> {
-    ops::corpus_list(&ws_id)
+async fn corpus_list(ws_id: String) -> Result<Vec<ops::WsFile>, String> {
+    tauri::async_runtime::spawn_blocking(move || ops::corpus_list(&ws_id))
+        .await
+        .map_err(|e| format!("语料列表任务崩溃: {e}"))?
 }
 
 #[tauri::command]
-fn corpus_read(ws_id: String, rel: String) -> Result<String, String> {
-    ops::corpus_read(&ws_id, &rel)
+async fn corpus_read(ws_id: String, rel: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || ops::corpus_read(&ws_id, &rel))
+        .await
+        .map_err(|e| format!("语料读取任务崩溃: {e}"))?
 }
 
 #[tauri::command]
-fn corpus_save(ws_id: String, rel: String, content: String) -> Result<String, String> {
-    ops::corpus_save(&ws_id, &rel, &content)
+async fn corpus_save(ws_id: String, rel: String, content: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || ops::corpus_save(&ws_id, &rel, &content))
+        .await
+        .map_err(|e| format!("语料保存任务崩溃: {e}"))?
 }
 
 #[tauri::command]
@@ -317,32 +335,46 @@ async fn corpus_import(
 }
 
 #[tauri::command]
-fn output_list(ws_id: String) -> Result<Vec<ops::WsFile>, String> {
-    ops::output_list(&ws_id)
+async fn output_list(ws_id: String) -> Result<Vec<ops::WsFile>, String> {
+    tauri::async_runtime::spawn_blocking(move || ops::output_list(&ws_id))
+        .await
+        .map_err(|e| format!("生成物列表任务崩溃: {e}"))?
 }
 
 #[tauri::command]
-fn output_read(ws_id: String, rel: String) -> Result<String, String> {
-    ops::output_read(&ws_id, &rel)
+async fn output_read(ws_id: String, rel: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || ops::output_read(&ws_id, &rel))
+        .await
+        .map_err(|e| format!("生成物读取任务崩溃: {e}"))?
 }
 
 #[tauri::command]
-fn output_save(ws_id: String, rel: String, content: String) -> Result<String, String> {
-    ops::output_save(&ws_id, &rel, &content)
+async fn output_save(ws_id: String, rel: String, content: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || ops::output_save(&ws_id, &rel, &content))
+        .await
+        .map_err(|e| format!("生成物保存任务崩溃: {e}"))?
 }
 
 /// 在系统文件管理器中打开生成物目录（失败回传前端明示，不静默）。
 #[tauri::command]
-fn open_output_dir(ws_id: String) -> Result<(), String> {
-    let paths = ops::ws_paths(&ws_id)?;
-    open_url(&paths.output)
+async fn open_output_dir(ws_id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let paths = ops::ws_paths(&ws_id)?;
+        open_url(&paths.output)
+    })
+    .await
+    .map_err(|e| format!("打开目录任务崩溃: {e}"))?
 }
 
 /// 在系统文件管理器中打开语料目录。
 #[tauri::command]
-fn open_corpus_dir(ws_id: String) -> Result<(), String> {
-    let paths = ops::ws_paths(&ws_id)?;
-    open_url(&paths.corpus)
+async fn open_corpus_dir(ws_id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let paths = ops::ws_paths(&ws_id)?;
+        open_url(&paths.corpus)
+    })
+    .await
+    .map_err(|e| format!("打开目录任务崩溃: {e}"))?
 }
 
 /// 交付目录设定：生成前由客户规定去向（支持 ~），改目录会作废确认。返回展开后绝对路径。
@@ -362,9 +394,13 @@ async fn delivery_confirm(ws_id: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn history_tail(ws_id: String, n: u32) -> Result<Vec<history::Event>, String> {
-    let ws = Workspace::open(&ws_id).map_err(|e| e.to_string())?;
-    history::tail(&ws, n as usize).map_err(|e| e.to_string())
+async fn history_tail(ws_id: String, n: u32) -> Result<Vec<history::Event>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let ws = Workspace::open(&ws_id).map_err(|e| e.to_string())?;
+        history::tail(&ws, n as usize).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| format!("历史读取任务崩溃: {e}"))?
 }
 
 #[tauri::command]
@@ -374,8 +410,11 @@ fn app_version() -> String {
 
 /// 界面文案语种（workspace.locale，读不到回退 zh）。
 #[tauri::command]
-fn ws_locale(ws_id: String) -> String {
-    ops::locale(&ws_id)
+async fn ws_locale(ws_id: String) -> String {
+    match tauri::async_runtime::spawn_blocking(move || ops::locale(&ws_id)).await {
+        Ok(v) => v,
+        Err(_) => "zh".to_string(),
+    }
 }
 
 /// 推进操作：dispatch 是阻塞的引擎调用，放到 spawn_blocking 里避免卡住 UI 线程。
@@ -531,23 +570,31 @@ fn open_github() -> Result<(), String> {
 }
 
 #[tauri::command]
-fn model_providers() -> Result<Vec<icewright_core::providers::Provider>, String> {
-    ops::provider_catalog()
+async fn model_providers() -> Result<Vec<icewright_core::providers::Provider>, String> {
+    tauri::async_runtime::spawn_blocking(ops::provider_catalog)
+        .await
+        .map_err(|e| format!("供应商目录任务崩溃: {e}"))?
 }
 
 #[tauri::command]
-fn model_get(ws_id: String) -> Result<ops::ModelInfo, String> {
-    ops::model_get(&ws_id)
+async fn model_get(ws_id: String) -> Result<ops::ModelInfo, String> {
+    tauri::async_runtime::spawn_blocking(move || ops::model_get(&ws_id))
+        .await
+        .map_err(|e| format!("模型配置读取任务崩溃: {e}"))?
 }
 
 #[tauri::command]
-fn model_set(
+async fn model_set(
     ws_id: String,
     base_url: String,
     model: String,
     key_ref: String,
 ) -> Result<(), String> {
-    ops::model_set(&ws_id, &base_url, &model, &key_ref)
+    tauri::async_runtime::spawn_blocking(move || {
+        ops::model_set(&ws_id, &base_url, &model, &key_ref)
+    })
+    .await
+    .map_err(|e| format!("模型配置保存任务崩溃: {e}"))?
 }
 
 /// 在线发现是阻塞 HTTP 调用，放 spawn_blocking 避免卡 UI 线程。

@@ -509,8 +509,7 @@ function initActions() {
 
 function titleOf(id) { return L().stage[id] || id; }
 
-async function renderHistory() {
-  var events = await invoke("history_tail", { wsId: selected, n: 50 });
+function paintHistory(events) {
   var ul = $("history");
   ul.innerHTML = "";
   if (!events.length) {
@@ -794,10 +793,21 @@ function initViewTabs() {
   });
 }
 
+/* 快速连点工作区时并发请求会交错：序号令牌保证只有最新一次 refresh 落盘渲染。 */
+var refreshSeq = 0;
+
 async function refresh() {
   if (!selected) { return; }
-  if (selected !== lastWs) { lastWs = selected; resetPanes(); }
-  var loc = await invoke("ws_locale", { wsId: selected });
+  var seq = ++refreshSeq;
+  var ws = selected;
+  if (ws !== lastWs) { lastWs = ws; resetPanes(); }
+  var res = await Promise.all([
+    invoke("ws_locale", { wsId: ws }),
+    invoke("pipeline_status", { wsId: ws }),
+    invoke("history_tail", { wsId: ws, n: 50 })
+  ]);
+  if (seq !== refreshSeq || ws !== selected) { return; }
+  var loc = res[0], st = res[1], events = res[2];
   var next = langPref || (String(loc).trim().toLowerCase() === "en" ? "en" : "zh");
   if (next !== lang) {
     lang = next;
@@ -805,13 +815,12 @@ async function refresh() {
     pushMenuLang(next);
     syncPrefs();
   }
-  var st = await invoke("pipeline_status", { wsId: selected });
   $("empty").classList.add("hidden");
   $("detail").classList.remove("hidden");
-  $("ws-title").textContent = selected;
+  $("ws-title").textContent = ws;
   renderStatus(st);
   renderActions(st);
-  await renderHistory();
+  paintHistory(events);
   if (view === "corpus") { await loadCorpus(); }
   else if (view === "output") { await loadOutput(); }
 }
