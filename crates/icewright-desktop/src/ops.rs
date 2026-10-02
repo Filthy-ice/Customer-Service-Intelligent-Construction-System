@@ -209,6 +209,44 @@ fn delivery_decide(ws_id: &str, approve: bool, note: Option<&str>) -> Result<Str
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    // HOME 重定向影响全局搜索路径，串行执行。
+    static HOME_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn dispatch_init_and_preflight_end_to_end_under_temp_home() {
+        let _serial = HOME_LOCK.lock().unwrap();
+        let home = std::env::temp_dir().join(format!("iw-dsk-home-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        std::env::set_var("HOME", &home);
+
+        // 新 workspace：init 前 dispatch 报「不存在」
+        assert!(dispatch("init", "live-e2e", None).is_err());
+        Workspace::create("live-e2e").unwrap();
+        let out = dispatch("init", "live-e2e", None).unwrap();
+        assert!(out.starts_with("已初始化 run-"), "{out}");
+        // 重复 init 被状态机拒绝
+        assert!(dispatch("init", "live-e2e", None)
+            .unwrap_err()
+            .contains("已存在"));
+        // 预检走完整引擎路径：即使环境不全也返回 PASS/FAIL 清单
+        let out = dispatch("preflight", "live-e2e", None);
+        let report = match out {
+            Ok(r) => r,
+            Err(e) => panic!("preflight dispatch 应返回清单而非中断: {e}"),
+        };
+        assert!(
+            report.contains("PASS") || report.contains("FAIL"),
+            "{report}"
+        );
+        // S1/S2 事件已入账（与 CLI 同一历史账本）
+        let ws = Workspace::open("live-e2e").unwrap();
+        let events = history::tail(&ws, 10).unwrap();
+        assert!(events.iter().any(|e| e.stage == "S1"), "{events:?}");
+        let _ = std::fs::remove_dir_all(&home);
+    }
 
     #[test]
     fn init_then_preflight_gate_flow_on_temp_workspace() {
