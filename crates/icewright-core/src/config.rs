@@ -10,12 +10,31 @@ pub struct Config {
     pub datasource: DatasourceCfg,
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct WorkspaceCfg {
     pub name: String,
     pub pack: String,
     pub stack: String,
+    /// CLI 文案语言：zh | en（空或未识别值由调用方回退 zh）
+    pub locale: String,
+    /// 生成物 Agent 框架覆盖（空=用每栈默认；值须命中该栈候选，见 frameworks::resolve）
+    pub agent_framework: String,
+    /// 是否在生成物中附带业务人员后台页 /console（默认关闭；调试页与开发后台始终必含）
+    pub business_console: bool,
+}
+
+impl Default for WorkspaceCfg {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            pack: String::new(),
+            stack: String::new(),
+            locale: "zh".to_string(),
+            agent_framework: String::new(),
+            business_console: false,
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -25,6 +44,9 @@ pub struct ModelCfg {
     pub model: String,
     pub key_ref: String,
     pub routing: RoutingCfg,
+    /// 单价（每百万 token），用于 S3 用量入账的 cost_estimate；两者缺一则不估算费用
+    pub price_in_per_mtok: Option<f64>,
+    pub price_out_per_mtok: Option<f64>,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -126,6 +148,7 @@ mod tests {
         let template = crate::workspace::DEFAULT_CONFIG_TOML.replace("{name}", "t");
         let cfg: Config = toml::from_str(&template).unwrap();
         assert_eq!(cfg.workspace.stack, "python");
+        assert_eq!(cfg.workspace.locale, "zh");
         assert!(cfg.model.key_ref.is_empty());
     }
 
@@ -141,6 +164,8 @@ mod tests {
         .unwrap();
         let cfg = set_and_save(&p, "model.base_url", "https://api.example.com/v1").unwrap();
         assert_eq!(cfg.model.base_url, "https://api.example.com/v1");
+        let cfg = set_and_save(&p, "workspace.locale", "en").unwrap();
+        assert_eq!(cfg.workspace.locale, "en");
         assert!(set_and_save(&p, "model.unknown_key", "x").is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }

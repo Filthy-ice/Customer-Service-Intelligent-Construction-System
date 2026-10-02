@@ -1,7 +1,10 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::Utc;
 use clap::{Parser, Subcommand};
+use i18n::{t, tf};
 use icewright_core::{secrets, state, Workspace};
+
+mod i18n;
 
 /// IceWright —— 行业客服系统智能构建器（CLI）
 #[derive(Parser)]
@@ -23,6 +26,8 @@ enum Cmd {
         #[command(subcommand)]
         action: PipelineAction,
     },
+    /// 一键流水线：S1 自动初始化，顺序推进到最近的人类闸门（闸门A/闸门B）停等确认，确认后重跑续进
+    Build { ws: String },
     /// workspace 配置读写（model.base_url、model.key_ref 等点号键）
     Config {
         #[command(subcommand)]
@@ -92,10 +97,22 @@ enum PipelineAction {
     Init { ws: String },
     /// S2 环境预检（语料/模型端点/密钥/stack/行业包），结论写回状态
     Preflight { ws: String },
-    /// S3 领域规则提取（契约校验 + 修复回环），产物 artifacts/rules.json
-    Extract { ws: String },
+    /// S3 领域产物提取（契约校验 + 修复回环 + 跨产物引用检查）
+    Extract {
+        ws: String,
+        /// 仅提取指定类型（apis/flows/dictionary/rules/skills）；缺省按依赖顺序提取全部五类
+        #[arg(long)]
+        kinds: Vec<String>,
+    },
     /// 打印某 workspace 的 pipeline 状态表
     Status { ws: String },
+    /// 打印生成历史（pipeline/history.jsonl，按时间顺序）
+    History {
+        ws: String,
+        /// 只显示最近 n 条
+        #[arg(long, default_value_t = 20)]
+        tail: usize,
+    },
 }
 
 #[derive(Subcommand)]
@@ -112,8 +129,17 @@ enum ConfigAction {
 
 #[derive(Subcommand)]
 enum SecretAction {
-    /// 从 stdin 读密钥并存储到 keyring 引用对应位置
+    /// 从 stdin 读密钥并存储到 keyring 引用对应位置（软件代存）
     Set { r#ref: String },
+    /// 删除 keyring:// 引用的软件代存副本（原生后端与文件回退两处）
+    Remove { r#ref: String },
+    /// 软件代配环境变量：stdin 读密钥，写入 ~/.icewright/env/icewright.env 的 export 行（0600）；
+    /// --shell-profile 指定启动文件（如 ~/.bashrc）则同时追加并备份
+    SetEnv {
+        var: String,
+        #[arg(long)]
+        shell_profile: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -176,6 +202,26 @@ enum DeliveryAction {
 enum ModelAction {
     /// 向模型发送一条探测消息并回报延迟与用量
     Probe { ws: String },
+    /// 列出内置+覆盖的供应商目录（接入点/文档/默认模型）
+    Providers,
+    /// 实时拉取供应商 /models 列出当前可用模型名（接入点与模型名不写死）
+    Discover {
+        /// 供应商名（`model providers` 可见），或 --url 直连任意 OpenAI-compatible 端点
+        provider: Option<String>,
+        #[arg(long)]
+        url: Option<String>,
+        /// 指定密钥环境变量名；缺省按供应商候选取第一个已设置的
+        #[arg(long)]
+        key_env: Option<String>,
+    },
+    /// 一键配置 workspace：写入供应商接入点与模型，密钥默认引用环境变量
+    Use {
+        ws: String,
+        provider: String,
+        /// 模型名；缺省用目录默认值（建议先 `model discover` 看在线名称）
+        #[arg(long)]
+        model: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -184,17 +230,30 @@ enum ContractAction {
     Check,
 }
 
+/// 打开 workspace 并按其配置切换 CLI 文案语言（配置非法时保持当前/环境语言，不掩盖真实错误：
+/// 后续命令若需要配置会自行 `ws.config()?` 报错）。
+fn open_ws(id: &str) -> Result<Workspace> {
+    let ws = Workspace::open(id)?;
+    if let Ok(cfg) = ws.config() {
+        i18n::set_locale(&cfg.workspace.locale);
+    }
+    Ok(ws)
+}
+
 fn cmd_ws_new(id: &str) -> Result<()> {
     let ws = Workspace::create(id)?;
-    println!("已创建 workspace: {}", ws.root.display());
-    println!("下一步：编辑 icewright.toml 配置模型与行业包，需求文档放入 corpus/");
+    println!(
+        "{}",
+        tf("ws_created", &[("path", &ws.root.display().to_string())])
+    );
+    println!("{}", t("ws_next"));
     Ok(())
 }
 
 fn cmd_ws_list() -> Result<()> {
     let ids = Workspace::list()?;
     if ids.is_empty() {
-        println!("（无 workspace，用 `icewright ws new <id>` 创建）");
+        println!("{}", t("ws_none"));
     }
     for id in ids {
         println!("{id}");
@@ -220,12 +279,12 @@ fn next_run_id(ws_dir: &std::path::Path, date: &str) -> String {
 }
 
 fn cmd_pipeline_init(ws_id: &str) -> Result<()> {
-    let ws = Workspace::open(ws_id)?;
+    let ws = open_ws(ws_id)?;
     let path = ws.state_path();
     if path.exists() {
         anyhow::bail!(
-            "pipeline 已存在: {}（重跑请先归档到 pipeline/history/）",
-            path.display()
+            "{}",
+            tf("pipeline_exists", &[("path", &path.display().to_string())])
         );
     }
     let cfg = ws.config()?;
@@ -238,31 +297,45 @@ fn cmd_pipeline_init(ws_id: &str) -> Result<()> {
     };
     let st = state::PipelineState::new(ws_id, &run_id, pack);
     state::save_state(&path, &st)?;
-    println!("已初始化 {}（{}）", run_id, path.display());
+    icewright_core::history::record(&ws, "S1", &format!("管线初始化 run={run_id}"))?;
+    println!(
+        "{}",
+        tf(
+            "pipeline_inited",
+            &[("run", &run_id), ("path", &path.display().to_string())]
+        )
+    );
     if pack.is_none() {
-        println!("提示：workspace.pack 未填写，后续 S3 起需要行业包引用");
+        println!("{}", t("hint_pack"));
     }
     if cfg.model.base_url.trim().is_empty() {
-        println!(
-            "提示：模型未配置，进入 S3 前需完成 `icewright config set` 与 `icewright secret set`"
-        );
+        println!("{}", t("hint_model"));
     }
     Ok(())
 }
 
 fn cmd_config_show(ws_id: &str) -> Result<()> {
-    let ws = Workspace::open(ws_id)?;
+    let ws = open_ws(ws_id)?;
     let raw = std::fs::read_to_string(ws.root.join("icewright.toml"))?;
     print!("{raw}");
     Ok(())
 }
 
 fn cmd_config_set(ws_id: &str, key: &str, value: &str) -> Result<()> {
-    let ws = Workspace::open(ws_id)?;
+    let ws = open_ws(ws_id)?;
     let cfg = icewright_core::config::set_and_save(&ws.root.join("icewright.toml"), key, value)?;
+    // 写入的若是 locale 本身，本次输出即用新语言
+    i18n::set_locale(&cfg.workspace.locale);
     println!(
-        "已设置 {key}（当前 model={} workspace.stack={}）",
-        cfg.model.model, cfg.workspace.stack
+        "{}",
+        tf(
+            "config_set",
+            &[
+                ("key", key),
+                ("model", &cfg.model.model),
+                ("stack", &cfg.workspace.stack)
+            ]
+        )
     );
     Ok(())
 }
@@ -270,15 +343,37 @@ fn cmd_config_set(ws_id: &str, key: &str, value: &str) -> Result<()> {
 fn cmd_secret_set(r#ref: &str) -> Result<()> {
     let r = secrets::SecretRef::parse(r#ref)?;
     let secret = secrets::read_secret_from_stdin()?;
-    secrets::store(&r, &secret)?;
-    println!("已存储密钥到 {}（stdin 输入，未回显）", r.to_uri());
+    let backend = secrets::store(&r, &secret)?;
+    match backend {
+        secrets::StoreBackend::Native => {
+            println!("{}", tf("secret_stored_native", &[("uri", &r.to_uri())]))
+        }
+        secrets::StoreBackend::FileFallback { reason } => println!(
+            "{}",
+            tf(
+                "secret_stored_fallback",
+                &[("uri", &r.to_uri()), ("reason", &reason)]
+            )
+        ),
+    }
+    Ok(())
+}
+
+fn cmd_secret_remove(r#ref: &str) -> Result<()> {
+    let r = secrets::SecretRef::parse(r#ref)?;
+    let (native, file) = secrets::remove(&r)?;
+    if native || file {
+        println!("{}", tf("secret_removed", &[("uri", &r.to_uri())]));
+    } else {
+        println!("{}", tf("secret_absent", &[("uri", &r.to_uri())]));
+    }
     Ok(())
 }
 
 fn cmd_pipeline_preflight(ws_id: &str) -> Result<()> {
-    let ws = Workspace::open(ws_id)?;
+    let ws = open_ws(ws_id)?;
     if !ws.state_path().exists() {
-        anyhow::bail!("请先 `icewright pipeline init {ws_id}`");
+        anyhow::bail!("{}", tf("need_init", &[("ws", ws_id)]));
     }
     let sroot = secrets::secrets_root()?;
     let (checks, all_ok) = icewright_core::preflight::run_and_record(&ws, &sroot)?;
@@ -291,83 +386,341 @@ fn cmd_pipeline_preflight(ws_id: &str) -> Result<()> {
         );
     }
     if all_ok {
-        println!("预检通过：可进入 S3 领域规则提取");
+        println!("{}", t("preflight_pass"));
         Ok(())
     } else {
-        anyhow::bail!("预检未通过（状态已记为 blocked_preflight），修复 FAIL 项后重跑")
+        anyhow::bail!("{}", t("preflight_fail"))
     }
 }
 
-fn cmd_pipeline_extract(ws_id: &str) -> Result<()> {
-    let ws = Workspace::open(ws_id)?;
+fn cmd_pipeline_extract(ws_id: &str, kinds: &[String]) -> Result<()> {
+    use icewright_core::extract::Kind;
+    let ws = open_ws(ws_id)?;
     if !ws.state_path().exists() {
-        anyhow::bail!("请先 `icewright pipeline init {ws_id}`");
+        anyhow::bail!("{}", tf("need_init", &[("ws", ws_id)]));
     }
     let st_before = state::load_state(&ws.state_path())?;
     if st_before.stage(state::StageId::S2).unwrap().status != state::StageStatus::Approved {
-        anyhow::bail!("S2 预检未通过，禁止进入 S3：先运行 `icewright pipeline preflight {ws_id}`");
+        anyhow::bail!("{}", tf("s2_blocked", &[("ws", ws_id)]));
     }
+    let selected: Vec<Kind> = if kinds.is_empty() {
+        Kind::ORDER.to_vec()
+    } else {
+        kinds
+            .iter()
+            .map(|s| {
+                Kind::parse_slug(s)
+                    .ok_or_else(|| anyhow::anyhow!("{}", tf("unknown_kind", &[("kind", s)])))
+            })
+            .collect::<Result<_>>()?
+    };
+    // 按依赖顺序执行，无视用户给出的顺序
+    let selected = Kind::ORDER
+        .into_iter()
+        .filter(|k| selected.contains(k))
+        .collect::<Vec<_>>();
+    let (cfg, key) = model_channel(&ws)?;
+    let st =
+        icewright_core::extract::run(&ws, &selected, |msgs| chat_call(&cfg.model, &key, msgs))?;
+    print_extract_summary(&ws, &selected, &st)?;
+    println!(
+        "{}",
+        tf(
+            "extract_done",
+            &[
+                ("n", &selected.len().to_string()),
+                ("stage", &format!("{:?}", st.current_stage))
+            ]
+        )
+    );
+    println!("{}", tf("extract_next", &[("ws", ws_id)]));
+    Ok(())
+}
+
+/// 按 workspace 配置打开模型通道：完整配置 + 解析后的明文密钥。
+fn model_channel(ws: &Workspace) -> Result<(icewright_core::config::Config, String)> {
     let cfg = ws.require_configured()?;
     let key = secrets::resolve(&secrets::SecretRef::parse(&cfg.model.key_ref)?)?;
-    let st = icewright_core::extract::run(&ws, |msgs| {
-        icewright_core::model::chat(
-            &cfg.model,
-            &key,
-            msgs,
-            false,
-            std::time::Duration::from_secs(120),
-        )
-        .map(|o| o.content)
-    })?;
-    let rules: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(
-        ws.artifact_path(icewright_core::extract::RULES_ARTIFACT),
-    )?)?;
-    let n = rules["rules"].as_array().map(|a| a.len()).unwrap_or(0);
-    println!(
-        "S3 完成：提取 {n} 条规则 → {}；当前阶段 {:?}",
-        ws.artifact_path(icewright_core::extract::RULES_ARTIFACT)
-            .display(),
-        st.current_stage
-    );
-    println!("下一步：`icewright design render {ws_id}` 生成设计文档供闸门A确认");
+    Ok((cfg, key))
+}
+
+/// S3 提取用的统一模型调用：120s 超时，把 ChatOutcome 映射为提取侧 CallOutcome。
+fn chat_call(
+    model_cfg: &icewright_core::config::ModelCfg,
+    key: &str,
+    msgs: &[icewright_core::model::ChatMessage],
+) -> Result<icewright_core::extract::CallOutcome> {
+    let o = icewright_core::model::chat(
+        model_cfg,
+        key,
+        msgs,
+        false,
+        std::time::Duration::from_secs(120),
+    )?;
+    Ok(icewright_core::extract::CallOutcome {
+        content: o.content,
+        model: Some(o.model),
+        tokens_in: o.tokens_in,
+        tokens_out: o.tokens_out,
+    })
+}
+
+/// 打印各类产物条目数与 S3 累计用量（extract 与 build 共用）。
+fn print_extract_summary(
+    ws: &Workspace,
+    kinds: &[icewright_core::extract::Kind],
+    st: &state::PipelineState,
+) -> Result<()> {
+    for k in kinds {
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(ws.artifact_path(k.file()))?)?;
+        let n = v[k.id_keys().0].as_array().map(|a| a.len()).unwrap_or(0);
+        println!(
+            "{}",
+            tf(
+                "extract_line",
+                &[
+                    ("slug", k.slug()),
+                    ("n", &n.to_string()),
+                    ("file", k.file())
+                ]
+            )
+        );
+    }
+    if let Some(u) = st.stage(state::StageId::S3).and_then(|s| s.usage.as_ref()) {
+        println!(
+            "{}",
+            tf(
+                "extract_usage",
+                &[
+                    ("in", &u.tokens_in.unwrap_or(0).to_string()),
+                    ("out", &u.tokens_out.unwrap_or(0).to_string()),
+                    (
+                        "cost",
+                        &u.cost_estimate
+                            .map(|c| format!("≈{c:.4}"))
+                            .unwrap_or_else(|| "-".to_string())
+                    ),
+                ]
+            )
+        );
+    }
     Ok(())
 }
 
 fn cmd_pipeline_status(ws_id: &str) -> Result<()> {
-    let ws = Workspace::open(ws_id)?;
+    let ws = open_ws(ws_id)?;
     let path = ws.state_path();
     if !path.exists() {
-        println!("workspace {ws_id} 尚无 pipeline（尚未运行构建）");
+        println!("{}", tf("status_none", &[("ws", ws_id)]));
         return Ok(());
     }
     let st = state::load_state(&path)?;
     println!(
-        "run {} · pack {} · 当前阶段 {:?}",
-        st.run_id,
-        st.pack_ref.as_deref().unwrap_or("-"),
-        st.current_stage
+        "{}",
+        tf(
+            "status_head",
+            &[
+                ("run", &st.run_id),
+                ("pack", st.pack_ref.as_deref().unwrap_or("-")),
+                ("stage", &format!("{:?}", st.current_stage))
+            ]
+        )
     );
     for s in &st.stages {
         let gate = match &s.gate {
             Some(g) => format!(" gate={:?}({})", g.decision, g.by),
             None => String::new(),
         };
+        let usage = s
+            .usage
+            .as_ref()
+            .map(|u| {
+                format!(
+                    " tokens={}/{} cost={}",
+                    u.tokens_in.unwrap_or(0),
+                    u.tokens_out.unwrap_or(0),
+                    u.cost_estimate
+                        .map(|c| format!("{c:.4}"))
+                        .unwrap_or_else(|| "-".to_string())
+                )
+            })
+            .unwrap_or_default();
         println!(
-            "  {:?} {:<16} {}{}",
+            "  {:?} {:<16} {}{}{}",
             s.id,
             format!("{:?}", s.status),
             s.output_hash
                 .as_deref()
                 .map(|h| &h[7..15])
                 .unwrap_or("--------"),
-            gate
+            gate,
+            usage
         );
     }
     Ok(())
 }
 
+fn cmd_pipeline_history(ws_id: &str, tail_n: usize) -> Result<()> {
+    let ws = open_ws(ws_id)?;
+    let events = icewright_core::history::tail(&ws, tail_n)?;
+    if events.is_empty() {
+        println!("{}", t("history_none"));
+        return Ok(());
+    }
+    println!("{}", tf("history_head", &[("n", &tail_n.to_string())]));
+    for e in &events {
+        println!(
+            "  {} {:<6} {}",
+            e.ts.format("%Y-%m-%d %H:%M:%S"),
+            e.stage,
+            e.detail
+        );
+    }
+    Ok(())
+}
+
+/// 某阶段是否已批准（无记录视为未批准）。
+fn stage_approved(st: &state::PipelineState, id: state::StageId) -> bool {
+    st.stage(id)
+        .map(|s| s.status == state::StageStatus::Approved)
+        .unwrap_or(false)
+}
+
+/// 一键流水线：S1 缺失自动初始化，S2→S7 顺序推进；
+/// 到人类闸门（A/B）未确认即停并提示确认命令，确认后重跑从断点续进。
+fn cmd_build(ws_id: &str) -> Result<()> {
+    use icewright_core::extract::Kind;
+    let ws = open_ws(ws_id)?;
+    // S1：无 pipeline 时自动初始化
+    if !ws.state_path().exists() {
+        let cfg = ws.config()?;
+        let date = Utc::now().format("%Y%m%d").to_string();
+        let run_id = next_run_id(&ws.root, &date);
+        let pack = if cfg.workspace.pack.trim().is_empty() {
+            None
+        } else {
+            Some(cfg.workspace.pack.as_str())
+        };
+        let st = state::PipelineState::new(ws_id, &run_id, pack);
+        state::save_state(&ws.state_path(), &st)?;
+        println!("{}", tf("build_init", &[("run", &run_id)]));
+    }
+    let mut st = state::load_state(&ws.state_path())?;
+
+    // S2 环境预检
+    if stage_approved(&st, state::StageId::S2) {
+        println!("{}", tf("build_already", &[("stage", "S2")]));
+    } else {
+        println!("{}", t("build_s2"));
+        let sroot = secrets::secrets_root()?;
+        let (checks, all_ok) = icewright_core::preflight::run_and_record(&ws, &sroot)?;
+        for c in &checks {
+            println!(
+                "  {}  {:<15} {}",
+                if c.ok { "PASS" } else { "FAIL" },
+                c.name,
+                c.detail
+            );
+        }
+        if !all_ok {
+            anyhow::bail!("{}", t("preflight_fail"));
+        }
+        st = state::load_state(&ws.state_path())?;
+    }
+
+    // S3 五类产物提取（真实模型调用，计入用量账本）
+    if stage_approved(&st, state::StageId::S3) {
+        println!("{}", tf("build_already", &[("stage", "S3")]));
+    } else {
+        println!("{}", t("build_s3"));
+        let (cfg, key) = model_channel(&ws)?;
+        st = icewright_core::extract::run(&ws, &Kind::ORDER, |msgs| {
+            chat_call(&cfg.model, &key, msgs)
+        })?;
+        print_extract_summary(&ws, &Kind::ORDER, &st)?;
+    }
+
+    // S4 设计文档渲染 + 闸门A
+    // 闸门A 已生效时不再重渲染：publish 会作废旧确认，build 的可重入性优先
+    if st.gate_is_current(state::StageId::S4) {
+        println!("{}", tf("build_already", &[("stage", "S4/闸门A")]));
+    } else {
+        println!("{}", t("build_s4"));
+        let had_design = ws
+            .artifact_path(icewright_core::design::DESIGN_DOC)
+            .exists();
+        let (path, changed) = icewright_core::design::publish(&ws)?;
+        println!("{}", tf("design_rendered", &[("path", &path)]));
+        if changed && had_design {
+            println!("{}", t("gate_a_void"));
+        }
+        st = state::load_state(&ws.state_path())?;
+        if !st.gate_is_current(state::StageId::S4) {
+            println!("{}", tf("build_gate_a", &[("ws", ws_id)]));
+            return Ok(());
+        }
+    }
+
+    // S5 代码生成
+    let out_dir = ws.root.join("output");
+    if stage_approved(&st, state::StageId::S5) {
+        println!("{}", tf("build_already", &[("stage", "S5")]));
+    } else {
+        println!("{}", t("build_s5"));
+        let report = icewright_core::generate::generate(&ws, &out_dir)?;
+        print_gen_report(&report);
+        st = state::load_state(&ws.state_path())?;
+    }
+
+    // S6 自动验证
+    if stage_approved(&st, state::StageId::S6) {
+        println!("{}", tf("build_already", &[("stage", "S6")]));
+    } else {
+        println!("{}", t("build_s6"));
+        let checks = icewright_core::verify::verify(
+            &ws,
+            &out_dir,
+            &icewright_core::verify::default_python(),
+        )?;
+        for c in &checks {
+            println!(
+                "  {}  {:<10} {}",
+                if c.ok { "PASS" } else { "FAIL" },
+                c.name,
+                c.detail.chars().take(120).collect::<String>()
+            );
+        }
+        if !checks.iter().all(|c| c.ok) {
+            anyhow::bail!("{}", tf("verify_fail", &[("ws", ws_id)]));
+        }
+    }
+
+    // S7 交付报告渲染 + 闸门B（闸门B 已生效时不再重渲染，理由同 S4）
+    if st.gate_is_current(state::StageId::S7) {
+        println!("{}", t("build_done"));
+        return Ok(());
+    }
+    println!("{}", t("build_s7"));
+    let had_delivery = ws
+        .artifact_path(icewright_core::delivery::DELIVERY_DOC)
+        .exists();
+    let (path, changed) = icewright_core::delivery::publish(&ws)?;
+    println!("{}", tf("delivery_rendered", &[("path", &path)]));
+    if changed && had_delivery {
+        println!("{}", t("gate_b_void"));
+    }
+    st = state::load_state(&ws.state_path())?;
+    if !st.gate_is_current(state::StageId::S7) {
+        println!("{}", tf("build_gate_b", &[("ws", ws_id)]));
+        return Ok(());
+    }
+    println!("{}", t("build_done"));
+    Ok(())
+}
+
 fn cmd_model_probe(ws_id: &str) -> Result<()> {
-    let ws = Workspace::open(ws_id)?;
+    let ws = open_ws(ws_id)?;
     let cfg = ws.require_configured()?;
     let r = secrets::SecretRef::parse(&cfg.model.key_ref)?;
     let key = secrets::resolve(&r)?;
@@ -382,22 +735,219 @@ fn cmd_model_probe(ws_id: &str) -> Result<()> {
     )?;
     let ok = out.content.to_ascii_lowercase().contains("pong");
     println!(
-        "  {}  model={}  延迟={:.1}ms  tokens={}/{}",
-        if ok { "PASS" } else { "FAIL" },
-        out.model,
-        out.latency.as_secs_f64() * 1000.0,
-        out.tokens_in.unwrap_or(0),
-        out.tokens_out.unwrap_or(0),
+        "{}",
+        tf(
+            "probe_line",
+            &[
+                ("verdict", if ok { "PASS" } else { "FAIL" }),
+                ("model", &out.model),
+                ("lat", &format!("{:.1}", out.latency.as_secs_f64() * 1000.0)),
+                ("tin", &out.tokens_in.unwrap_or(0).to_string()),
+                ("tout", &out.tokens_out.unwrap_or(0).to_string()),
+            ]
+        )
     );
     println!(
-        "  回复: {}",
-        out.content.chars().take(80).collect::<String>()
+        "{}",
+        tf(
+            "probe_reply",
+            &[("text", &out.content.chars().take(80).collect::<String>())]
+        )
     );
     if ok {
         Ok(())
     } else {
-        anyhow::bail!("探测未通过：回复中不含 pong（端点可用但模型行为异常）")
+        anyhow::bail!("{}", t("probe_fail"))
     }
+}
+
+fn cmd_model_providers() -> Result<()> {
+    for p in icewright_core::providers::catalog()? {
+        println!("  {:<12} {:<28} {}", p.name, p.display, p.base_url);
+        println!(
+            "{}",
+            tf(
+                "providers_meta",
+                &[
+                    ("pad", " ".repeat(13).as_str()),
+                    ("default", &p.default_model),
+                    ("docs", &p.docs_url)
+                ]
+            )
+        );
+    }
+    println!("{}", t("providers_note"));
+    Ok(())
+}
+
+fn cmd_model_discover(
+    provider: Option<&str>,
+    url: Option<&str>,
+    key_env: Option<&str>,
+) -> Result<()> {
+    let (base, key_envs) = match (provider, url) {
+        (Some(name), _) => {
+            let p = icewright_core::providers::find(name)?;
+            (p.base_url.clone(), p.key_envs)
+        }
+        (None, Some(u)) => (u.to_string(), vec![]),
+        (None, None) => anyhow::bail!("{}", t("need_provider_or_url")),
+    };
+    let candidates: Vec<String> = match key_env {
+        Some(v) => vec![v.to_string()],
+        None if !key_envs.is_empty() => key_envs,
+        None => vec!["OPENAI_API_KEY".into()],
+    };
+    let Some((used, key)) = candidates.iter().find_map(|v| {
+        std::env::var(v)
+            .ok()
+            .filter(|s| !s.is_empty())
+            .map(|s| (v.clone(), s))
+    }) else {
+        anyhow::bail!("{}", tf("no_key_env", &[("tried", &candidates.join(", "))]));
+    };
+    println!(
+        "{}",
+        tf("discover_probing", &[("base", &base), ("used", &used)])
+    );
+    let ids =
+        icewright_core::providers::list_models(&base, &key, std::time::Duration::from_secs(20))?;
+    println!("{}", tf("discover_found", &[("n", &ids.len().to_string())]));
+    for id in &ids {
+        println!("  - {id}");
+    }
+    println!("{}", t("discover_next"));
+    Ok(())
+}
+
+fn cmd_model_use(ws_id: &str, provider_name: &str, model: Option<&str>) -> Result<()> {
+    let ws = open_ws(ws_id)?;
+    let p = icewright_core::providers::find(provider_name)?;
+    let chosen_model = model.unwrap_or(p.default_model.as_str()).to_string();
+    let cfg_path = ws.root.join("icewright.toml");
+    icewright_core::config::set_and_save(&cfg_path, "model.base_url", &p.base_url)?;
+    icewright_core::config::set_and_save(&cfg_path, "model.model", &chosen_model)?;
+    // 密钥引用：已配置就沿用；否则取第一个已存在的环境变量候选改为 env:// 引用
+    let cfg = ws.config()?;
+    if cfg.model.key_ref.trim().is_empty() {
+        let existing = p
+            .key_envs
+            .iter()
+            .find(|v| std::env::var(v).map(|s| !s.is_empty()).unwrap_or(false));
+        match existing {
+            Some(v) => {
+                let r = format!("env://{v}");
+                icewright_core::config::set_and_save(&cfg_path, "model.key_ref", &r)?;
+                println!("{}", tf("key_ref_adopted", &[("r", &r)]));
+            }
+            None => {
+                let v = p
+                    .key_envs
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| "OPENAI_API_KEY".into());
+                println!("{}", tf("model_use_hint", &[("v", &v), ("ws", ws_id)]));
+                anyhow::bail!("{}", t("model_use_bail"));
+            }
+        }
+    }
+    println!(
+        "{}",
+        tf(
+            "model_use_done",
+            &[
+                ("ws", ws_id),
+                ("provider", &p.display),
+                ("url", &p.base_url),
+                ("model", &chosen_model),
+                ("docs", &p.docs_url),
+            ]
+        )
+    );
+    println!(
+        "{}",
+        tf(
+            "model_use_next",
+            &[("ws", ws_id), ("provider", provider_name)]
+        )
+    );
+    Ok(())
+}
+
+/// shell 单引号安全包裹
+fn sh_quote(v: &str) -> String {
+    format!("'{}'", v.replace('\'', "'\\''"))
+}
+
+fn cmd_secret_set_env(var: &str, shell_profile: Option<&str>) -> Result<()> {
+    secrets::SecretRef::parse(&format!("env://{var}")).context(t("bad_env_name"))?;
+    let secret = secrets::read_secret_from_stdin()?;
+    let line = format!("export {var}={}\n", sh_quote(&secret));
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .context(t("no_home"))?;
+    let env_dir = std::path::PathBuf::from(&home)
+        .join(".icewright")
+        .join("env");
+    std::fs::create_dir_all(&env_dir)?;
+    #[cfg(unix)]
+    std::fs::set_permissions(
+        &env_dir,
+        std::os::unix::fs::PermissionsExt::from_mode(0o700),
+    )?;
+    let env_file = env_dir.join("icewright.env");
+    // 同变量旧行替换，避免重复 export 遮蔽
+    let mut kept = String::new();
+    if env_file.exists() {
+        kept = std::fs::read_to_string(&env_file)?
+            .lines()
+            .filter(|l| !l.starts_with(&format!("export {var}=")))
+            .map(|l| format!("{l}\n"))
+            .collect();
+    }
+    kept.push_str(&line);
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&env_file)?;
+        f.write_all(kept.as_bytes())?;
+    }
+    #[cfg(not(unix))]
+    std::fs::write(&env_file, kept)?;
+    let shown = env_file.display().to_string();
+    println!("{}", tf("env_written", &[("path", &shown)]));
+    if let Some(profile) = shell_profile {
+        let p = std::path::Path::new(profile);
+        let old = std::fs::read_to_string(p).unwrap_or_default();
+        let backup = format!("{}.bak-icewright", profile);
+        std::fs::write(&backup, &old)?;
+        let mut append = String::new();
+        if !old.contains(&format!("source {shown}")) {
+            append.push_str(&format!("\nsource {shown}\n"));
+        }
+        if !append.is_empty() {
+            use std::io::Write;
+            let mut f = std::fs::OpenOptions::new().append(true).open(p)?;
+            f.write_all(append.as_bytes())?;
+            println!(
+                "{}",
+                tf(
+                    "profile_appended",
+                    &[("profile", profile), ("backup", &backup)]
+                )
+            );
+        } else {
+            println!("{}", tf("profile_present", &[("profile", profile)]));
+        }
+    }
+    println!("{}", tf("set_env_next", &[("var", var)]));
+    Ok(())
 }
 
 fn parse_role(s: Option<&str>) -> Result<Option<state::GateRole>> {
@@ -405,7 +955,9 @@ fn parse_role(s: Option<&str>) -> Result<Option<state::GateRole>> {
         None => Ok(None),
         Some("business_owner") => Ok(Some(state::GateRole::BusinessOwner)),
         Some("tech_reviewer") => Ok(Some(state::GateRole::TechReviewer)),
-        Some(other) => anyhow::bail!("role 只允许 business_owner|tech_reviewer，收到 {other:?}"),
+        Some(other) => {
+            anyhow::bail!("{}", tf("bad_role", &[("got", &format!("{other:?}"))]))
+        }
     }
 }
 
@@ -413,28 +965,26 @@ fn cmd_design(action: &DesignAction) -> Result<()> {
     use icewright_core::design;
     match action {
         DesignAction::Render { ws } => {
-            let ws = Workspace::open(ws)?;
+            let ws = open_ws(ws)?;
+            let had_prev = ws.artifact_path(design::DESIGN_DOC).exists();
             let (path, changed) = design::publish(&ws)?;
-            println!("设计文档已渲染: {path}");
-            if changed {
-                println!("内容较上次有变化：既往闸门A 确认已作废，需重新确认");
+            println!("{}", tf("design_rendered", &[("path", &path)]));
+            if changed && had_prev {
+                println!("{}", t("gate_a_void"));
             }
-            println!(
-                "审阅后执行 `icewright design approve|reject {ws_id}`",
-                ws_id = ws.id
-            );
+            println!("{}", tf("design_review", &[("ws", &ws.id)]));
         }
         DesignAction::Show { ws } => {
-            let ws = Workspace::open(ws)?;
+            let ws = open_ws(ws)?;
             let p = ws.artifact_path(design::DESIGN_DOC);
             print!(
                 "{}",
                 std::fs::read_to_string(&p)
-                    .unwrap_or_else(|_| format!("尚未渲染: {}", p.display()))
+                    .unwrap_or_else(|_| tf("not_rendered", &[("path", &p.display().to_string())]))
             );
         }
         DesignAction::Approve { ws, by, note, role } => {
-            let ws = Workspace::open(ws)?;
+            let ws = open_ws(ws)?;
             design::decide(
                 &ws,
                 state::GateDecision::Approved,
@@ -442,10 +992,10 @@ fn cmd_design(action: &DesignAction) -> Result<()> {
                 parse_role(role.as_deref())?,
                 note.as_deref(),
             )?;
-            println!("闸门A 已批准（绑定当前产物哈希）。下一步：S5 代码生成");
+            println!("{}", t("gate_a_approved"));
         }
         DesignAction::Reject { ws, by, note, role } => {
-            let ws = Workspace::open(ws)?;
+            let ws = open_ws(ws)?;
             design::decide(
                 &ws,
                 state::GateDecision::Rejected,
@@ -453,35 +1003,73 @@ fn cmd_design(action: &DesignAction) -> Result<()> {
                 parse_role(role.as_deref())?,
                 Some(note),
             )?;
-            println!("闸门A 已驳回：{note}");
-            println!("修订语料/产物后重新 `icewright design render {}`", ws.id);
+            println!("{}", tf("gate_a_rejected", &[("note", note)]));
+            println!("{}", tf("design_fix", &[("ws", &ws.id)]));
         }
     }
     Ok(())
 }
 
+/// 生成结果通用输出：概览 + 增量 diff 分类 + 定制保留（generate 与 build 共用）。
+fn print_gen_report(report: &icewright_core::generate::GenerateReport) {
+    println!(
+        "{}",
+        tf(
+            "gen_done",
+            &[
+                ("n", &report.written.len().to_string()),
+                ("dir", &report.out_dir.display().to_string()),
+                ("hash", &report.output_hash[7..15]),
+            ]
+        )
+    );
+    println!(
+        "{}",
+        tf(
+            "gen_diff",
+            &[
+                ("c", &report.diff.created.len().to_string()),
+                ("m", &report.diff.modified.len().to_string()),
+                ("u", &report.diff.unchanged.len().to_string()),
+                ("r", &report.diff.removed.len().to_string()),
+                ("k", &report.diff.conflicts.len().to_string()),
+            ]
+        )
+    );
+    for f in &report.diff.created {
+        println!("{}", tf("gen_created", &[("f", f)]));
+    }
+    for f in &report.diff.modified {
+        println!("{}", tf("gen_modified", &[("f", f)]));
+    }
+    for f in &report.diff.removed {
+        println!("{}", tf("gen_removed", &[("f", f)]));
+    }
+    for f in &report.diff.conflicts {
+        println!("{}", tf("gen_conflict", &[("f", f)]));
+    }
+    for f in &report.preserved {
+        println!("{}", tf("gen_preserved", &[("f", f)]));
+    }
+    if !report.diff.conflicts.is_empty() {
+        println!("{}", t("gen_conflict_next"));
+    }
+}
+
 fn cmd_generate(ws_id: &str, out: Option<&str>) -> Result<()> {
-    let ws = Workspace::open(ws_id)?;
+    let ws = open_ws(ws_id)?;
     let out_dir = match out {
         Some(p) => std::path::PathBuf::from(p),
         None => ws.root.join("output"),
     };
     let report = icewright_core::generate::generate(&ws, &out_dir)?;
-    println!(
-        "S5 生成完成：{} 个文件 → {}（output {}）",
-        report.written.len(),
-        report.out_dir.display(),
-        &report.output_hash[7..15]
-    );
-    for f in &report.preserved {
-        println!("  保留定制文件（ICEWRIGHT-CUSTOM）: {f}");
-    }
-    println!("下一步：进入生成目录安装依赖并运行测试（见 README.md），S6 自动验证随后接入");
+    print_gen_report(&report);
+    println!("{}", t("gen_next"));
     Ok(())
 }
 
 fn cmd_verify(ws_id: &str, out: Option<&str>, python: Option<&str>) -> Result<()> {
-    let ws = Workspace::open(ws_id)?;
+    let ws = open_ws(ws_id)?;
     let out_dir = match out {
         Some(p) => std::path::PathBuf::from(p),
         None => ws.root.join("output"),
@@ -499,10 +1087,10 @@ fn cmd_verify(ws_id: &str, out: Option<&str>, python: Option<&str>) -> Result<()
         );
     }
     if checks.iter().all(|c| c.ok) {
-        println!("S6 通过：可进入 S7 验收交付（评测集回放随后接入）");
+        println!("{}", t("verify_pass"));
         Ok(())
     } else {
-        anyhow::bail!("S6 未通过（状态已记为 failed），修复后重跑 `icewright verify {ws_id}`")
+        anyhow::bail!("{}", tf("verify_fail", &[("ws", ws_id)]))
     }
 }
 
@@ -510,25 +1098,26 @@ fn cmd_delivery(action: &DeliveryAction) -> Result<()> {
     use icewright_core::delivery;
     match action {
         DeliveryAction::Render { ws } => {
-            let ws = Workspace::open(ws)?;
+            let ws = open_ws(ws)?;
+            let had_prev = ws.artifact_path(delivery::DELIVERY_DOC).exists();
             let (path, changed) = delivery::publish(&ws)?;
-            println!("交付报告已渲染: {path}");
-            if changed {
-                println!("内容较上次有变化：既往闸门B 确认已作废，需重新确认");
+            println!("{}", tf("delivery_rendered", &[("path", &path)]));
+            if changed && had_prev {
+                println!("{}", t("gate_b_void"));
             }
-            println!("审阅后执行 `icewright delivery approve|reject {}`", ws.id);
+            println!("{}", tf("delivery_review", &[("ws", &ws.id)]));
         }
         DeliveryAction::Show { ws } => {
-            let ws = Workspace::open(ws)?;
+            let ws = open_ws(ws)?;
             let p = ws.artifact_path(delivery::DELIVERY_DOC);
             print!(
                 "{}",
                 std::fs::read_to_string(&p)
-                    .unwrap_or_else(|_| format!("尚未渲染: {}", p.display()))
+                    .unwrap_or_else(|_| tf("not_rendered", &[("path", &p.display().to_string())]))
             );
         }
         DeliveryAction::Approve { ws, by, note, role } => {
-            let ws = Workspace::open(ws)?;
+            let ws = open_ws(ws)?;
             delivery::decide(
                 &ws,
                 state::GateDecision::Approved,
@@ -536,10 +1125,10 @@ fn cmd_delivery(action: &DeliveryAction) -> Result<()> {
                 parse_role(role.as_deref())?,
                 note.as_deref(),
             )?;
-            println!("闸门B 已批准：交付生效，进入 S8 变更/重生成态");
+            println!("{}", t("gate_b_approved"));
         }
         DeliveryAction::Reject { ws, by, note, role } => {
-            let ws = Workspace::open(ws)?;
+            let ws = open_ws(ws)?;
             delivery::decide(
                 &ws,
                 state::GateDecision::Rejected,
@@ -547,16 +1136,24 @@ fn cmd_delivery(action: &DeliveryAction) -> Result<()> {
                 parse_role(role.as_deref())?,
                 Some(note),
             )?;
-            println!("闸门B 已驳回：{note}");
-            println!("修订后重新 `icewright delivery render {}`", ws.id);
+            println!("{}", tf("gate_b_rejected", &[("note", note)]));
+            println!("{}", tf("delivery_fix", &[("ws", &ws.id)]));
         }
     }
     Ok(())
 }
 
 fn cmd_evaluate(ws_id: &str, url: &str) -> Result<()> {
-    let ws = Workspace::open(ws_id)?;
-    let outcomes = icewright_core::evaluate::evaluate(&ws, url)?;
+    let ws = open_ws(ws_id)?;
+    // 裁判通道可选：模型不可用时语义断言记 deferred，确定性断言照常判定
+    let channel = model_channel(&ws).ok();
+    if channel.is_none() {
+        println!("{}", t("eval_no_channel"));
+    }
+    let outcomes = icewright_core::evaluate::evaluate(&ws, url, |msgs| match &channel {
+        Some((cfg, key)) => chat_call(&cfg.model, key, msgs),
+        None => Err(anyhow::anyhow!("模型通道未配置")),
+    })?;
     for o in &outcomes {
         println!(
             "  {:<16} {:<16} {:>8}  {}",
@@ -579,9 +1176,18 @@ fn cmd_evaluate(ws_id: &str, url: &str) -> Result<()> {
         .iter()
         .filter(|o| o.status == icewright_core::evaluate::CaseStatus::Pass)
         .count();
-    println!("评测完成：{passed}/{total} 通过；结论写入 artifacts/delivery/eval-result.json");
+    println!(
+        "{}",
+        tf(
+            "eval_done",
+            &[
+                ("passed", &passed.to_string()),
+                ("total", &total.to_string())
+            ]
+        )
+    );
     if breached {
-        anyhow::bail!("hard 红线用例未通过（S6 已记 eval_failed），修复后重跑评测")
+        anyhow::bail!("{}", t("eval_hard_fail"));
     }
     Ok(())
 }
@@ -601,14 +1207,29 @@ fn cmd_contract_check() -> Result<()> {
         }
     }
     if failed > 0 {
-        anyhow::bail!("{failed} 份契约实例校验失败");
+        anyhow::bail!("{}", tf("contract_failed", &[("n", &failed.to_string())]));
     }
-    println!("全部 {} 份契约自检通过", reports.len());
+    println!(
+        "{}",
+        tf("contract_pass", &[("n", &reports.len().to_string())])
+    );
     Ok(())
 }
 
+fn parse_cli() -> Cli {
+    use clap::CommandFactory;
+    let mut cmd = Cli::command();
+    if i18n::is_en() {
+        // 帮助语言只做尽力覆盖：对账问题在单测里拦，运行时不阻断命令
+        let _ = i18n::apply_en_help(&mut cmd);
+    }
+    let matches = cmd.get_matches();
+    clap::FromArgMatches::from_arg_matches(&matches).unwrap_or_else(|e| e.exit())
+}
+
 fn main() -> Result<()> {
-    let cli = Cli::parse();
+    i18n::init_from_env();
+    let cli = parse_cli();
     match &cli.command {
         Cmd::Ws { action } => match action {
             WsAction::New { id } => cmd_ws_new(id),
@@ -617,15 +1238,21 @@ fn main() -> Result<()> {
         Cmd::Pipeline { action } => match action {
             PipelineAction::Init { ws } => cmd_pipeline_init(ws),
             PipelineAction::Preflight { ws } => cmd_pipeline_preflight(ws),
-            PipelineAction::Extract { ws } => cmd_pipeline_extract(ws),
+            PipelineAction::Extract { ws, kinds } => cmd_pipeline_extract(ws, kinds),
             PipelineAction::Status { ws } => cmd_pipeline_status(ws),
+            PipelineAction::History { ws, tail } => cmd_pipeline_history(ws, *tail),
         },
+        Cmd::Build { ws } => cmd_build(ws),
         Cmd::Config { action } => match action {
             ConfigAction::Show { ws } => cmd_config_show(ws),
             ConfigAction::Set { ws, key, value } => cmd_config_set(ws, key, value),
         },
         Cmd::Secret { action } => match action {
             SecretAction::Set { r#ref } => cmd_secret_set(r#ref),
+            SecretAction::Remove { r#ref } => cmd_secret_remove(r#ref),
+            SecretAction::SetEnv { var, shell_profile } => {
+                cmd_secret_set_env(var, shell_profile.as_deref())
+            }
         },
         Cmd::Design { action } => cmd_design(action),
         Cmd::Generate { ws, out } => cmd_generate(ws, out.as_deref()),
@@ -634,9 +1261,36 @@ fn main() -> Result<()> {
         Cmd::Evaluate { ws, url } => cmd_evaluate(ws, url),
         Cmd::Model { action } => match action {
             ModelAction::Probe { ws } => cmd_model_probe(ws),
+            ModelAction::Providers => cmd_model_providers(),
+            ModelAction::Discover {
+                provider,
+                url,
+                key_env,
+            } => cmd_model_discover(provider.as_deref(), url.as_deref(), key_env.as_deref()),
+            ModelAction::Use {
+                ws,
+                provider,
+                model,
+            } => cmd_model_use(ws, provider, model.as_deref()),
         },
         Cmd::Contract { action } => match action {
             ContractAction::Check => cmd_contract_check(),
         },
+    }
+}
+
+#[cfg(test)]
+mod help_i18n_tests {
+    use clap::CommandFactory;
+
+    /// SUB_HELP/ARG_HELP 与 derive 命令树双向对账：漏译或表里留旧路径都会失败。
+    #[test]
+    fn english_help_tables_match_command_tree() {
+        let mut cmd = crate::Cli::command();
+        let problems = crate::i18n::apply_en_help(&mut cmd);
+        assert!(
+            problems.is_empty(),
+            "clap 英文帮助对账失败（补表或删旧项）：{problems:#?}"
+        );
     }
 }

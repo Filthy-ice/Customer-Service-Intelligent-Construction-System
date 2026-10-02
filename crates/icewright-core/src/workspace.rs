@@ -6,12 +6,18 @@ pub const DEFAULT_CONFIG_TOML: &str = r#"# IceWright workspace 配置（生成�
 [workspace]
 name = "{name}"
 pack = ""          # 行业包引用，如 insurance/auto-claim@0.1.0
-stack = "python"   # python | java | go(experimental)
+stack = "python"   # python | java | go（三栈线格式一致，S6 按栈分派验证）
+locale = "zh"      # CLI 文案语言：zh | en（临时覆盖用环境变量 ICERIGHT_LOCALE）
+#agent_framework = ""  # 覆盖生成物 agent 框架默认选型（留空用每栈默认；见设计文档候选表）
+#business_console = false  # 生成物附带业务人员后台页 /console（调试页与开发后台始终必含）
 
 [model]
-base_url = ""      # OpenAI-compatible 端点
-model = ""         # 默认模型；分阶段路由见 [model.routing]
-key_ref = ""       # 仅 keyring 引用（keyring://...），禁止内联密钥
+base_url = ""      # OpenAI-compatible 端点；`icewright model use <ws> <provider>` 从目录自动填
+model = ""         # 默认模型；`icewright model discover <provider>` 看在线可用名
+key_ref = ""       # 密钥引用：keyring://（软件代存）| env://VAR（用户自配环境变量）| plain:（明文，界面用）
+# 单价（每百万 token）：两项都填才估算 S3 费用，留空只记 token 账
+#price_in_per_mtok = 1.0
+#price_out_per_mtok = 2.0
 
 [model.routing]
 # extract = "strong-model"   # S3 规则提取
@@ -21,7 +27,7 @@ key_ref = ""       # 仅 keyring 引用（keyring://...），禁止内联密钥
 #[datasource.redis]
 #host = ""
 #port = 6379
-#key_ref = ""                 # 仅 keyring 引用（keyring://...），禁内联密码
+#key_ref = ""                 # 同上三类引用（推荐 keyring:// 或 env://，避免明文）
 #[datasource.mysql]
 #host = ""
 #port = 3306
@@ -47,6 +53,22 @@ pub fn base_dir() -> Result<PathBuf> {
     Ok(PathBuf::from(home).join(".icewright").join("workspaces"))
 }
 
+/// 语料投放约定：新建 workspace 写入 corpus/README.md，按五类产物分目录归置。
+const CORPUS_README: &str = r#"# 语料组织约定
+
+按五类产物把需求材料放入对应子目录（文件名任意，建议 Markdown/txt）：
+
+- apis/        核心系统接口文档（地址、字段、鉴权方式）
+- flows/       业务流程、状态机、话术脚本
+- dictionary/  数据字典、字段口径、枚举值表
+- rules/       行业规则、政策条款、合规红线
+- skills/      技能/意图说明（用户会说什么、期望怎么处理）
+- other/       暂不好归类的材料（与上述目录一并送入提取）
+
+提取时递归读取所有子目录文件，本 README 不参与提取。
+一份材料可同时放多个目录；总量超上限时引擎会报错并提示拆分或先做摘要。
+"#;
+
 pub struct Workspace {
     pub id: String,
     pub root: PathBuf,
@@ -65,6 +87,12 @@ impl Workspace {
         }
         for dir in [
             "corpus",
+            "corpus/apis",
+            "corpus/flows",
+            "corpus/dictionary",
+            "corpus/rules",
+            "corpus/skills",
+            "corpus/other",
             "artifacts",
             "artifacts/design",
             "artifacts/evals",
@@ -75,6 +103,7 @@ impl Workspace {
         ] {
             std::fs::create_dir_all(root.join(dir))?;
         }
+        std::fs::write(root.join("corpus/README.md"), CORPUS_README)?;
         std::fs::write(
             root.join("icewright.toml"),
             DEFAULT_CONFIG_TOML.replace("{name}", id),
@@ -140,7 +169,9 @@ impl Workspace {
             );
         }
         if cfg.model.key_ref.trim().is_empty() {
-            bail!("密钥引用未配置：model.key_ref 必须是 keyring:// 引用");
+            bail!(
+                "密钥引用未配置：model.key_ref 支持 keyring://、env://VAR_NAME、plain: 三种（详见 README「模型接入与密钥」）"
+            );
         }
         Ok(cfg)
     }

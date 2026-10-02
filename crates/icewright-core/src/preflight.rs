@@ -64,11 +64,8 @@ fn tcp_reachable(host: &str, port: u16, timeout: Duration) -> Result<(), String>
 }
 
 fn corpus_has_files(ws: &Workspace) -> Result<bool> {
-    let dir = ws.root.join("corpus");
-    if !dir.exists() {
-        return Ok(false);
-    }
-    Ok(std::fs::read_dir(&dir)?.next().is_some())
+    // 递归统计子目录分类里的文件；README.md 说明文件不计入
+    Ok(!crate::extract::corpus_files(&ws.root)?.is_empty())
 }
 
 /// S2 环境预检：全部依赖外部条件（模型端点、密钥、行业包、需求语料）必须先绿。
@@ -108,7 +105,7 @@ pub fn run(ws: &Workspace, secrets_root: &Path) -> Result<Vec<Check>> {
 
     let key_check = match SecretRef::parse(cfg.model.key_ref.trim()) {
         Err(e) => Check::new("model_key", false, format!("{e:#}")),
-        Ok(r) => match secrets::resolve_at(secrets_root, &r) {
+        Ok(r) => match secrets::resolve_in(secrets_root, &r) {
             Ok(_) => Check::new("model_key", true, format!("{} 可解析", r.to_uri())),
             Err(_) => Check::new(
                 "model_key",
@@ -132,6 +129,8 @@ pub fn run(ws: &Workspace, secrets_root: &Path) -> Result<Vec<Check>> {
         ),
     ));
 
+    checks.push(toolchain_check(&cfg.workspace.stack));
+
     checks.push(Check::new(
         "pack",
         !cfg.workspace.pack.trim().is_empty(),
@@ -145,6 +144,42 @@ pub fn run(ws: &Workspace, secrets_root: &Path) -> Result<Vec<Check>> {
     checks.extend(datasource_checks(&cfg, secrets_root, timeout));
 
     Ok(checks)
+}
+
+/// 构建工具链探测：S6 验证要用栈对应编译器，缺了会在 S6 才暴露，不如在 S2 拦住。
+fn toolchain_check(stack: &str) -> Check {
+    let program: std::path::PathBuf = match stack {
+        "python" => crate::verify::default_python(),
+        "java" => crate::verify::default_maven(),
+        "go" => std::path::PathBuf::from("go"),
+        other => return Check::new("toolchain", false, format!("stack={other:?} 无已知工具链")),
+    };
+    let arg = match stack {
+        "java" => "-version",
+        "go" => "version",
+        _ => "--version",
+    };
+    match std::process::Command::new(&program).arg(arg).output() {
+        Ok(out) if out.status.success() => {
+            let first = String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .chain(String::from_utf8_lossy(&out.stderr).lines())
+                .find(|l| !l.trim().is_empty())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            Check::new("toolchain", true, format!("{program:?} → {first}"))
+        }
+        Ok(out) => Check::new(
+            "toolchain",
+            false,
+            format!(
+                "{program:?} {arg} 退出码 {:?}，S6 验证将不可用",
+                out.status.code()
+            ),
+        ),
+        Err(e) => Check::new("toolchain", false, format!("找不到 {program:?}: {e}")),
+    }
 }
 
 /// Redis/MySQL 协议级探测；未配置 host 则非阻塞跳过。
@@ -167,7 +202,7 @@ fn datasource_checks(
             None
         } else {
             match SecretRef::parse(redis.key_ref.trim())
-                .and_then(|r| secrets::resolve_at(secrets_root, &r))
+                .and_then(|r| secrets::resolve_in(secrets_root, &r))
             {
                 Ok(p) => Some(p),
                 Err(e) => {
@@ -258,6 +293,9 @@ pub fn run_and_record(ws: &Workspace, secrets_root: &Path) -> Result<(Vec<Check>
     }
     st.updated_at = Some(now);
     state::save_state(&path, &st)?;
+    if all_ok {
+        crate::history::record(ws, "S2", &format!("预检通过 {} 项", checks.len()))?;
+    }
     Ok((checks, all_ok))
 }
 

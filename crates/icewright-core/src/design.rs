@@ -40,12 +40,30 @@ pub fn render_design(ws: &Workspace) -> Result<String> {
     out.push_str("## 1. 系统概览\n\n");
     out.push_str(&format!("- 行业包：{}\n", nv(&cfg.workspace.pack)));
     out.push_str(&format!("- 目标栈：{}\n", cfg.workspace.stack));
+    out.push_str("- 前端语言：zh / en（生成项目自带聊天页面，访客可切换；未知语言回退 zh）\n");
     out.push_str(&format!(
-        "- 模型：{} @ {}（密钥仅以引用存储：{}）\n",
+        "- 页面矩阵：/ 开发调试聊天页（必含，含规则命中与会话槽位回显）、/admin 开发后台（必含，只读规则/技能/接口契约/运行态，不落业务数据）、/console 业务人员后台（{}）\n",
+        if cfg.workspace.business_console {
+            "已开启：workspace.business_console=true"
+        } else {
+            "未开启（默认）；需要业务后台请 `icewright config set <ws> workspace.business_console true` 后重新渲染"
+        }
+    ));
+    out.push_str(&format!(
+        "- 模型：{} @ {}（密钥引用：{}）\n",
         nv(&cfg.model.model),
         mask_endpoint(&cfg.model.base_url),
         key_ref_display(&cfg)
     ));
+    if SecretRef::parse(&cfg.model.key_ref)
+        .map(|r| r.is_plaintext())
+        .unwrap_or(false)
+    {
+        out.push_str(
+            "- ⚠ 模型密钥以明文内嵌于配置文件（plain: 引用，客户端界面场景）。请确保该文件权限 0600 且不提交版本库；工程交付建议改用 env:// 或 keyring:// 引用。\n",
+        );
+    }
+    out.push_str(&framework_section(&cfg)?);
     out.push_str("\n## 2. 领域规则清单\n\n");
     out.push_str("| ID | 类型 | 执行点 | 规则内容 |\n|---|---|---|---|\n");
     for r in rules_arr {
@@ -73,15 +91,22 @@ pub fn render_design(ws: &Workspace) -> Result<String> {
     }
 
     out.push_str("\n## 4. 数据字段（条件引用）\n\n");
-    if let Some(dict) = load_json(ws, "dictionary.json")? {
+    if let Some(dict) = load_json(ws, crate::extract::DICTIONARY_ARTIFACT)? {
         for f in dict["fields"].as_array().unwrap_or(&Vec::new()) {
+            let pii = f["pii"].as_str().unwrap_or("none");
+            let pii_tag = if pii == "none" {
+                String::new()
+            } else {
+                format!("，pii={pii}")
+            };
             out.push_str(&format!(
-                "- {}（来源 {}）\n",
-                f["id"].as_str().unwrap_or("?"),
+                "- {}（来源 {}{}）\n",
+                f["field"].as_str().unwrap_or("?"),
                 f["source"]["kind"]
                     .as_str()
                     .or(f["source"].as_str())
-                    .unwrap_or("?")
+                    .unwrap_or("?"),
+                pii_tag
             ));
         }
     } else {
@@ -102,22 +127,160 @@ pub fn render_design(ws: &Workspace) -> Result<String> {
         ));
     }
 
-    out.push_str("\n## 5. 外部接口（运行时实时调用，本系统不落库）\n\n");
-    if let Some(apis) = load_json(ws, "apis.json")? {
-        for a in apis["apis"].as_array().unwrap_or(&Vec::new()) {
+    out.push_str("\n## 5. 对话流程（harness 内由模型自主驱动，非硬编码工作流）\n\n");
+    if let Some(flows) = load_json(ws, crate::extract::FLOWS_ARTIFACT)? {
+        for flow in flows["flows"].as_array().unwrap_or(&Vec::new()) {
+            let slots = flow["slots"].as_array().map(|a| a.len()).unwrap_or(0);
             out.push_str(&format!(
-                "- {} {} — {}\n",
+                "- **{}** {}（槽位 {slots} 个）\n",
+                flow["flow"].as_str().unwrap_or("?"),
+                flow["description"].as_str().unwrap_or("")
+            ));
+            let states = flow["states"].as_array().cloned().unwrap_or_default();
+            for s in &states {
+                let sid = s["id"].as_str().unwrap_or("?");
+                let ty = s["type"].as_str().unwrap_or("normal");
+                let trs: Vec<String> = s["transitions"]
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .map(|t| {
+                                let rr = t["rule_ref"]
+                                    .as_str()
+                                    .map(|r| format!(" ⇐{r}"))
+                                    .unwrap_or_default();
+                                format!(
+                                    "{}→{}{rr}",
+                                    t["on"].as_str().unwrap_or("?"),
+                                    t["to"].as_str().unwrap_or("?")
+                                )
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let acts: Vec<String> = s["actions"]
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .map(|x| {
+                                format!(
+                                    "{}:{}",
+                                    x["kind"].as_str().unwrap_or("?"),
+                                    x["ref"].as_str().unwrap_or("")
+                                )
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                out.push_str(&format!(
+                    "  - {sid} [{ty}]{}\n",
+                    if trs.is_empty() && acts.is_empty() {
+                        String::new()
+                    } else {
+                        format!("；动作 {}；转移 {}", acts.join("、"), trs.join(" | "))
+                    }
+                ));
+            }
+        }
+    } else {
+        out.push_str("- （尚未提供 flows.json；无流程则运行时仅按规则驱动）\n");
+    }
+
+    out.push_str("\n## 6. 技能清单（意图 → 能力绑定，运行时按意图激活）\n\n");
+    if let Some(skills) = load_json(ws, crate::extract::SKILLS_ARTIFACT)? {
+        let list = skills["skills"].as_array().cloned().unwrap_or_default();
+        let mut pending = 0usize;
+        for s in &list {
+            let status = s["status"].as_str().unwrap_or("pending");
+            if status != "confirmed" {
+                pending += 1;
+            }
+            let cap = &s["capability"];
+            let intents = s["intents"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|x| x.as_str())
+                        .collect::<Vec<_>>()
+                        .join("/")
+                })
+                .unwrap_or_default();
+            let mut extras: Vec<String> = Vec::new();
+            let req: Vec<&str> = s["required_fields"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
+                .unwrap_or_default();
+            if !req.is_empty() {
+                extras.push(format!("前置字段 {}", req.join("、")));
+            }
+            let rr: Vec<&str> = s["rule_refs"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
+                .unwrap_or_default();
+            if !rr.is_empty() {
+                extras.push(format!("生效规则 {}", rr.join("、")));
+            }
+            out.push_str(&format!(
+                "- **{}** {}（意图 {intents}）→ {}:{}{}{}\n",
+                s["id"].as_str().unwrap_or("?"),
+                s["name"].as_str().unwrap_or(""),
+                cap["kind"].as_str().unwrap_or("?"),
+                cap["ref"].as_str().unwrap_or(""),
+                if status == "confirmed" {
+                    String::new()
+                } else {
+                    format!(" ⚠status={status}")
+                },
+                if extras.is_empty() {
+                    String::new()
+                } else {
+                    format!("；{}", extras.join("；"))
+                }
+            ));
+        }
+        if pending > 0 {
+            out.push_str(&format!(
+                "\n> ⚠ {pending} 个技能尚未人工确认（status≠confirmed）；闸门A 审阅时请核对意图覆盖与能力绑定，运行时仅装载已确认技能。\n"
+            ));
+        }
+    } else {
+        out.push_str(
+            "- （尚未提供 skills.json；闸门A 前请补 `pipeline extract --kinds skills`）\n",
+        );
+    }
+
+    out.push_str("\n## 7. 外部接口（运行时实时调用，本系统不落库）\n\n");
+    if let Some(apis) = load_json(ws, crate::extract::APIS_ARTIFACT)? {
+        let list = apis["apis"].as_array().cloned().unwrap_or_default();
+        let mut unconfirmed = 0usize;
+        for a in &list {
+            if a["confirmed_by_customer"].as_bool() != Some(true) {
+                unconfirmed += 1;
+            }
+            out.push_str(&format!(
+                "- {} {}{} — {}\n",
                 a["method"].as_str().unwrap_or("?"),
-                a["path"].as_str().unwrap_or("?"),
-                a["description"].as_str().unwrap_or("")
+                a["endpoint"].as_str().unwrap_or("?"),
+                if a["confirmed_by_customer"].as_bool() == Some(true) {
+                    ""
+                } else {
+                    " ⚠未确认"
+                },
+                a["purpose"].as_str().unwrap_or("")
+            ));
+        }
+        if unconfirmed > 0 {
+            out.push_str(&format!(
+                "\n> ⚠ {unconfirmed} 个接口尚未确认（confirmed_by_customer=false）；闸门A 批准前须逐个与对方技术部门核实真实存在，否则 S5 生成将被拒绝。\n"
             ));
         }
     } else {
         out.push_str("- （尚未提供 apis.json，请在闸门A 前确认对方核心系统接口）\n");
     }
 
-    out.push_str("\n## 6. 闸门A 确认须知\n\n");
+    out.push_str("\n## 8. 闸门A 确认须知\n\n");
     out.push_str("- 本文件由引擎确定性渲染；任何产物变更后须重新 `design render` 并再次确认。\n");
+    out.push_str("- 技术栈与\"生成物 Agent 框架选型\"小节代表交付承诺：确认即锁定，S5 按此构建，改动请驳回后重渲染。\n");
     out.push_str("- 确认后进入 S5 代码生成；驳回请附注原因。\n");
     Ok(out)
 }
@@ -128,6 +291,51 @@ fn nv(s: &str) -> &str {
     } else {
         s
     }
+}
+
+/// 生成物 agent 框架选型章节（frameworks 知识库的 2026-10-01 调研快照）。
+/// 栈未填/未收录时返回空串，不打断概览。
+fn framework_section(cfg: &Config) -> Result<String> {
+    let Some(fw) =
+        crate::frameworks::resolve(&cfg.workspace.stack, &cfg.workspace.agent_framework)?
+    else {
+        return Ok(String::new());
+    };
+    let overridden = !cfg.workspace.agent_framework.trim().is_empty();
+    let mut out = String::from("\n### 生成物 Agent 框架选型（调研快照 2026-10-01）\n\n");
+    out.push_str(&format!(
+        "- 选定：{} {}（栈 {}，{}）\n",
+        fw.name,
+        fw.version_line,
+        cfg.workspace.stack,
+        if overridden {
+            "用户覆盖默认"
+        } else {
+            "每栈默认"
+        }
+    ));
+    out.push_str(match fw.integration {
+        crate::frameworks::Integration::Implemented => {
+            "- 集成状态：✅ S5 模板已按该框架构建生成物\n"
+        }
+        crate::frameworks::Integration::Planned => {
+            "- 集成状态：⏳ 模板集成实施中；本选型随闸门A 一并确认，S5 未达该状态绝不谎称交付\n"
+        }
+    });
+    out.push_str("- 覆盖方式：`icewright config set <ws> workspace.agent_framework <候选名>`\n\n");
+    out.push_str("| 候选 | 版本线 | Star | 优势 | 劣势 |\n|---|---|---|---|---|\n");
+    for c in crate::frameworks::candidates(&cfg.workspace.stack) {
+        let mark = if c.name == fw.name { " ★" } else { "" };
+        out.push_str(&format!(
+            "| {}{mark} | {} | {} | {} | {} |\n",
+            c.name,
+            c.version_line,
+            c.stars,
+            c.pros.replace('|', "\\|"),
+            c.cons.replace('|', "\\|")
+        ));
+    }
+    Ok(out)
 }
 
 fn key_ref_display(cfg: &Config) -> String {
@@ -155,6 +363,7 @@ pub fn publish(ws: &Workspace) -> Result<(String, bool)> {
     std::fs::create_dir_all(artifact.parent().unwrap())?;
     std::fs::write(&artifact, &md)?;
     let hash = state::sha256_hex(md.as_bytes());
+    let short_hash = hash[7..15].to_string();
     let changed = st.stage(StageId::S4).unwrap().output_hash.as_deref() != Some(hash.as_str());
     let now = Utc::now();
     if changed {
@@ -169,6 +378,7 @@ pub fn publish(ws: &Workspace) -> Result<(String, bool)> {
     }
     st.updated_at = Some(now);
     state::save_state(&path, &st)?;
+    crate::history::record(ws, "S4", &format!("设计文档渲染完成 hash={short_hash}"))?;
     Ok((artifact.display().to_string(), changed))
 }
 
@@ -216,7 +426,14 @@ pub fn decide(
         }
     }
     st.updated_at = Some(now);
-    state::save_state(&path, &st)
+    state::save_state(&path, &st)?;
+    let label = match decision {
+        GateDecision::Approved => "确认通过",
+        GateDecision::Rejected => "驳回",
+        GateDecision::PartialEdit => "部分编辑驳回",
+    };
+    crate::history::record(ws, "闸门A", &format!("设计文档{label}（决策人 {by}）"))?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -313,6 +530,93 @@ mod tests {
         assert!(md.contains("R-AUTO-0001"));
         assert!(md.contains("keyring://"));
         assert!(!md.contains("sk-"));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn design_covers_flows_dictionary_and_api_confirmation() {
+        let (ws, base) = ws_with_rules("full");
+        for (contract, file) in [
+            ("api-contract", crate::extract::APIS_ARTIFACT),
+            ("flows", crate::extract::FLOWS_ARTIFACT),
+            ("data-dictionary", crate::extract::DICTIONARY_ARTIFACT),
+        ] {
+            let v = icewright_artifact::example(contract).unwrap();
+            std::fs::write(
+                ws.artifact_path(file),
+                serde_json::to_string_pretty(&v).unwrap(),
+            )
+            .unwrap();
+        }
+        let md = render_design(&ws).unwrap();
+        assert!(md.contains("F-report"), "应有流程章节");
+        assert!(md.contains("slots_complete(F-report)"));
+        assert!(md.contains("FLD-claim_status"), "字典字段应正确渲染");
+        assert!(md.contains("⚠未确认"), "样例接口默认未确认应标红");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn design_renders_skills_and_pending_warning() {
+        let (ws, base) = ws_with_rules("skills");
+        let md = render_design(&ws).unwrap();
+        assert!(
+            md.contains("尚未提供 skills.json"),
+            "缺产物时应给出补齐指引"
+        );
+
+        let skills = icewright_artifact::example("skills").unwrap();
+        std::fs::write(
+            ws.artifact_path(crate::extract::SKILLS_ARTIFACT),
+            serde_json::to_string_pretty(&skills).unwrap(),
+        )
+        .unwrap();
+        let md = render_design(&ws).unwrap();
+        assert!(md.contains("## 6. 技能清单"));
+        assert!(md.contains("**SK-progress-query**"));
+        assert!(md.contains("api_call:API-claim-progress"));
+        assert!(md.contains("⚠status=pending"));
+        assert!(md.contains("3 个技能尚未人工确认"));
+
+        // 全部确认后 pending 警示消失
+        let mut v = skills;
+        for s in v["skills"].as_array_mut().unwrap() {
+            s["status"] = serde_json::json!("confirmed");
+        }
+        std::fs::write(
+            ws.artifact_path(crate::extract::SKILLS_ARTIFACT),
+            serde_json::to_string_pretty(&v).unwrap(),
+        )
+        .unwrap();
+        let md = render_design(&ws).unwrap();
+        assert!(!md.contains("尚未人工确认"));
+        assert!(!md.contains("⚠status="));
+        assert!(md.contains("页面矩阵"), "设计文档应含页面矩阵章节");
+        assert!(
+            md.contains("未开启（默认）"),
+            "业务后台默认关闭应在设计文档中如实呈现"
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn framework_section_renders_default_and_validates_override() {
+        let (ws, base) = ws_with_rules("framework");
+        let md = render_design(&ws).unwrap();
+        assert!(md.contains("### 生成物 Agent 框架选型"));
+        assert!(md.contains("agentscope"));
+        assert!(md.contains("★"));
+        assert!(md.contains("S5 模板已按该框架构建生成物"));
+
+        let p = ws.root.join("icewright.toml");
+        crate::config::set_and_save(&p, "workspace.agent_framework", "tensorflow").unwrap();
+        assert!(render_design(&ws).is_err(), "非法候选必须拒绝渲染");
+
+        crate::config::set_and_save(&p, "workspace.agent_framework", "langgraph").unwrap();
+        let md = render_design(&ws).unwrap();
+        assert!(md.contains("用户覆盖默认"));
+        assert!(md.contains("langgraph ★"));
+        assert!(md.contains("模板集成实施中"), "未集成的候选须如实标注状态");
         let _ = std::fs::remove_dir_all(&base);
     }
 }

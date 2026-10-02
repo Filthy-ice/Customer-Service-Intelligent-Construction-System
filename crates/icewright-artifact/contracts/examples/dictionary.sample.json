@@ -9,6 +9,11 @@
       "description": "报案/请求提交时间"
     },
     {
+      "field": "FLD-claim_status",
+      "type": "string",
+      "source": { "kind": "api", "ref": "API-claim-progress" }
+    },
+    {
       "field": "FLD-claim_documents_complete",
       "type": "bool",
       "source": { "kind": "api", "ref": "API-claim-progress" }
@@ -31,6 +36,27 @@
         "expr": "now() - FLD-claim_submitted_at",
         "depends_on": ["FLD-claim_submitted_at"]
       }
+    },
+    {
+      "field": "FLD-case_no",
+      "type": "string",
+      "source": { "kind": "api", "ref": "API-claim-progress", "jsonpath": "$.caseNo" },
+      "pii": "masked",
+      "description": "报案号/理赔案号"
+    },
+    {
+      "field": "FLD-accident_time",
+      "type": "datetime",
+      "source": { "kind": "api", "ref": "API-survey-create", "jsonpath": "$.accidentTime" },
+      "pii": "none",
+      "description": "出险时间"
+    },
+    {
+      "field": "FLD-survey_no",
+      "type": "string",
+      "source": { "kind": "api", "ref": "API-survey-create", "jsonpath": "$.surveyNo" },
+      "pii": "none",
+      "description": "查勘工单号"
     }
   ]
 }
