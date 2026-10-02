@@ -30,6 +30,9 @@ struct MenuText {
     view: &'static str,
     lang: &'static str,
     window: &'static str,
+    win_min: &'static str,
+    win_max: &'static str,
+    win_close: &'static str,
     help: &'static str,
     about: &'static str,
     github: &'static str,
@@ -39,11 +42,14 @@ const TEXTS_ZH: MenuText = MenuText {
     file: "文件",
     refresh: "刷新",
     reload: "重新加载",
-    settings: "模型设置…",
+    settings: "设置…",
     quit: "退出",
     view: "视图",
     lang: "语言",
     window: "窗口",
+    win_min: "最小化",
+    win_max: "最大化 / 还原",
+    win_close: "关闭窗口",
     help: "帮助",
     about: "关于 IceWright",
     github: "GitHub 主页",
@@ -53,11 +59,14 @@ const TEXTS_EN: MenuText = MenuText {
     file: "File",
     refresh: "Refresh",
     reload: "Reload",
-    settings: "Model Settings…",
+    settings: "Settings…",
     quit: "Quit",
     view: "View",
     lang: "Language",
     window: "Window",
+    win_min: "Minimize",
+    win_max: "Maximize / Restore",
+    win_close: "Close Window",
     help: "Help",
     about: "About IceWright",
     github: "GitHub Homepage",
@@ -125,11 +134,13 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         .item(&lang_submenu)
         .build()?;
 
+    // GTK 环境下 PredefinedMenuItem 的窗口项会渲染为置灰不可点，改为自实现项，
+    // 点击后在 handle_menu_action 里直接调 WebviewWindow 方法（三平台一致可用）。
     let window = SubmenuBuilder::new(app, t.window)
-        .item(&PredefinedMenuItem::minimize(app, None)?)
-        .item(&PredefinedMenuItem::maximize(app, None)?)
+        .item(&item(app, "win_min", t.win_min, Some("CmdOrCtrl+M"))?)
+        .item(&item(app, "win_max", t.win_max, None)?)
         .item(&PredefinedMenuItem::separator(app)?)
-        .item(&PredefinedMenuItem::close_window(app, None)?)
+        .item(&item(app, "win_close", t.win_close, Some("CmdOrCtrl+W"))?)
         .build()?;
 
     let about = item(app, "about", t.about, None)?;
@@ -166,6 +177,12 @@ fn apply_menu(app: &tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 fn ws_list() -> Result<Vec<String>, String> {
     Workspace::list().map_err(|e| e.to_string())
+}
+
+/// 界面上直接创建工作区（与 CLI ws new 同一引擎入口，ID 校验/重名报错由引擎负责）。
+#[tauri::command]
+fn ws_create(ws_id: String) -> Result<String, String> {
+    ops::ws_create(&ws_id)
 }
 
 /// 某 workspace 的完整 pipeline 状态；尚未 init 时返回 None（UI 显示引导文案）。
@@ -294,6 +311,24 @@ fn handle_menu_action(app: &tauri::AppHandle, id: &str) {
             let _ = apply_menu(app);
             let _ = app.emit("menu-action", format!("lang:{}", &id[5..]));
         }
+        "win_min" | "win_max" | "win_close" => {
+            if let Some(w) = app.get_webview_window("main") {
+                let r = match id {
+                    "win_min" => w.minimize(),
+                    "win_max" => {
+                        if w.is_maximized().unwrap_or(false) {
+                            w.unmaximize()
+                        } else {
+                            w.maximize()
+                        }
+                    }
+                    _ => w.close(),
+                };
+                if let Err(e) = r {
+                    eprintln!("window action {id} failed: {e}");
+                }
+            }
+        }
         "refresh" | "reload" | "about" | "settings" => {
             let _ = app.emit("menu-action", id);
         }
@@ -305,6 +340,7 @@ fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             ws_list,
+            ws_create,
             pipeline_status,
             history_tail,
             app_version,

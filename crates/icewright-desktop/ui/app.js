@@ -38,7 +38,7 @@ var DICT = {
       about_desc: "S1–S8 流水线构建器：把行业规则与流程交给 AI，产出可交付的客服系统。",
       about_github: "GitHub 主页",
       about_close: "关闭",
-      settings: "模型设置",
+      settings: "设置",
       set_provider: "供应商",
       set_base: "接入点 Base URL",
       set_model: "模型名",
@@ -52,6 +52,22 @@ var DICT = {
       set_saved: "已保存到本工作区 icewright.toml",
       set_discovering: "发现中…",
       set_pick_ws: "先在左侧选择工作区",
+      tab_model: "模型接入",
+      tab_lang: "语言",
+      tab_theme: "外观",
+      lang_label: "界面语言",
+      lang_auto: "自动跟随工作区",
+      lang_hint: "未手动选择时界面语种跟随 workspace.locale；手动选择后跨重启记忆。",
+      theme_label: "主题",
+      theme_auto: "跟随系统",
+      theme_light: "浅色",
+      theme_dark: "深色",
+      theme_hint: "主题即时生效并跨重启记忆；跟随系统时随操作系统深浅色自动切换。",
+      ws_create: "新建",
+      ws_id_ph: "新工作区 ID",
+      ws_created: "已创建工作区 {0}：选中后点「初始化」启动管线",
+      ws_empty_id: "请输入工作区 ID",
+      aside_toggle: "收起 / 展开侧栏",
       err_base: "接入点必须以 http(s):// 开头",
       err_model: "模型名不能为空",
       err_key: "密钥引用格式不合法（掩码值需重新输入）",
@@ -92,7 +108,7 @@ var DICT = {
       about_desc: "S1-S8 pipeline builder: hand industry rules and flows to the AI, get a deliverable customer-service system back.",
       about_github: "GitHub Homepage",
       about_close: "Close",
-      settings: "Model Settings",
+      settings: "Settings",
       set_provider: "Provider",
       set_base: "Base URL",
       set_model: "Model",
@@ -106,6 +122,22 @@ var DICT = {
       set_saved: "Saved to this workspace's icewright.toml",
       set_discovering: "Discovering…",
       set_pick_ws: "Pick a workspace on the left first",
+      tab_model: "Model",
+      tab_lang: "Language",
+      tab_theme: "Appearance",
+      lang_label: "UI language",
+      lang_auto: "Follow workspace locale",
+      lang_hint: "Without a manual choice the UI language follows workspace.locale; a manual choice persists across restarts.",
+      theme_label: "Theme",
+      theme_auto: "Follow system",
+      theme_light: "Light",
+      theme_dark: "Dark",
+      theme_hint: "Theme applies instantly and persists across restarts; follow-system tracks the OS light/dark setting.",
+      ws_create: "Create",
+      ws_id_ph: "New workspace id",
+      ws_created: "Workspace {0} created: select it and click Init to start the pipeline",
+      ws_empty_id: "Enter a workspace id",
+      aside_toggle: "Collapse / expand sidebar",
       err_base: "Base URL must start with http(s)://",
       err_model: "Model name is required",
       err_key: "Invalid key reference (re-enter if it shows a mask)",
@@ -156,7 +188,27 @@ function applyStatic() {
     el.textContent = U(el.getAttribute("data-i18n"));
   });
   $("op-note").placeholder = U("note_placeholder");
+  $("ws-new-id").placeholder = U("ws_id_ph");
+  $("aside-toggle").title = U("aside_toggle");
 }
+
+/* ---------- 主题：跟随系统 / 强制浅色 / 强制深色 ---------- */
+var THEMES = ["auto", "light", "dark"];
+var themePref = "auto";
+try { if (THEMES.indexOf(localStorage.getItem("iw_theme")) >= 0) { themePref = localStorage.getItem("iw_theme"); } } catch (e) { /* 隐私模式 */ }
+function applyTheme() {
+  if (themePref === "auto") { document.documentElement.removeAttribute("data-theme"); }
+  else { document.documentElement.setAttribute("data-theme", themePref); }
+}
+function setTheme(t) {
+  themePref = t;
+  try {
+    if (t === "auto") { localStorage.removeItem("iw_theme"); }
+    else { localStorage.setItem("iw_theme", t); }
+  } catch (e) { /* 隐私模式 */ }
+  applyTheme();
+}
+applyTheme();
 
 var selected = null;
 var $ = function (id) { return document.getElementById(id); };
@@ -188,6 +240,50 @@ async function loadWorkspaces() {
     ul.appendChild(li);
   });
   if (ids.length && !selected) { selected = ids[0]; }
+}
+
+/* ---------- 侧栏收起 ---------- */
+function initAside() {
+  var lay = $("layout");
+  var collapsed = false;
+  try { collapsed = localStorage.getItem("iw_aside") === "1"; } catch (e) { /* 隐私模式 */ }
+  function paint() {
+    lay.classList.toggle("collapsed", collapsed);
+    $("aside-toggle").textContent = collapsed ? "▶" : "◀";
+  }
+  paint();
+  $("aside-toggle").onclick = function () {
+    collapsed = !collapsed;
+    paint();
+    try { localStorage.setItem("iw_aside", collapsed ? "1" : "0"); } catch (e) { /* 隐私模式 */ }
+  };
+}
+
+/* ---------- 新建工作区 ---------- */
+function wsNote(text) {
+  var n = $("ws-note");
+  n.classList.remove("hidden");
+  n.textContent = text;
+}
+
+function createWorkspace() {
+  var id = $("ws-new-id").value.trim();
+  if (!id) { wsNote("✘ " + U("ws_empty_id")); return; }
+  invoke("ws_create", { wsId: id }).then(function () {
+    $("ws-new-id").value = "";
+    selected = id;
+    wsNote("✔ " + fmt(U("ws_created"), [id]));
+    tick();
+  }).catch(function (err) {
+    wsNote("✘ " + (String(err) === "empty_ws_id" ? U("ws_empty_id") : err));
+  });
+}
+
+function initWsCreate() {
+  $("ws-create").onclick = createWorkspace;
+  $("ws-new-id").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { createWorkspace(); }
+  });
 }
 
 function renderStatus(st) {
@@ -442,6 +538,8 @@ function fillFromProvider() {
 }
 
 function openSettings() {
+  showSettingsTab("model");
+  syncSettingRadios();
   if (!selected) {
     $("set-status").textContent = U("set_pick_ws");
     $("settings-modal").classList.remove("hidden");
@@ -496,6 +594,57 @@ function saveModel() {
   }).catch(function (err) { $("set-status").textContent = setErr(err); });
 }
 
+/* ---------- 设置标签页与语言/外观面板 ---------- */
+function showSettingsTab(t) {
+  ["model", "lang", "theme"].forEach(function (k) {
+    $("tab-" + k).classList.toggle("active", k === t);
+    $("pane-" + k).classList.toggle("hidden", k !== t);
+  });
+  // 保存只对模型接入有意义；语言/外观单选即时生效。
+  $("set-save").classList.toggle("hidden", t !== "model");
+  $("set-status").textContent = "";
+}
+
+function eachRadio(name, fn) {
+  Array.prototype.forEach.call(document.getElementsByName(name), fn);
+}
+
+function syncSettingRadios() {
+  var cur = langPref || "auto";
+  eachRadio("pref-lang", function (r) { r.checked = r.value === cur; });
+  eachRadio("pref-theme", function (r) { r.checked = r.value === themePref; });
+}
+
+function setLangPref(p) {
+  if (p === "auto") {
+    langPref = null;
+    try { localStorage.removeItem("iw-lang"); } catch (e) { /* 隐私模式 */ }
+    if (selected) {
+      refresh();
+    } else {
+      lang = "zh";
+      applyStatic();
+      renderLangToggle();
+      pushMenuLang(lang);
+    }
+  } else {
+    syncLang(p);
+    refresh();
+  }
+}
+
+function initSettingsPanes() {
+  ["model", "lang", "theme"].forEach(function (k) {
+    $("tab-" + k).onclick = function () { showSettingsTab(k); };
+  });
+  eachRadio("pref-lang", function (r) {
+    r.onchange = function () { if (r.checked) { setLangPref(r.value); } };
+  });
+  eachRadio("pref-theme", function (r) {
+    r.onchange = function () { if (r.checked) { setTheme(r.value); } };
+  });
+}
+
 function initSettings() {
   $("open-settings").onclick = openSettings;
   $("set-close").onclick = closeSettings;
@@ -503,6 +652,7 @@ function initSettings() {
   $("set-discover").onclick = discoverModels;
   $("set-provider").onchange = fillFromProvider;
   $("set-found").onchange = function () { $("set-model").value = this.value; };
+  initSettingsPanes();
   $("settings-modal").addEventListener("click", function (e) {
     if (e.target === this) { closeSettings(); }
   });
@@ -541,6 +691,8 @@ function initMenuEvents() {
 }
 
 initLangToggle();
+initAside();
+initWsCreate();
 initActions();
 initAbout();
 initSettings();

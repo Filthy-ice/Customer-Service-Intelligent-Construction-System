@@ -83,6 +83,16 @@ fn open(ws_id: &str) -> Result<Workspace, String> {
     Workspace::open(ws_id).map_err(e2s)
 }
 
+/// 界面新建工作区：与 CLI ws new 同一引擎入口；ID 合法性与重名由引擎报错（已双语）。
+pub fn ws_create(ws_id: &str) -> Result<String, String> {
+    let id = ws_id.trim();
+    if id.is_empty() {
+        return Err("empty_ws_id".to_string());
+    }
+    let ws = Workspace::create(id).map_err(e2s)?;
+    Ok(ws.root.display().to_string())
+}
+
 /* ---------- 模型（AI 供应商）配置：结构化返回，文案由前端 i18n ---------- */
 
 #[derive(serde::Serialize)]
@@ -386,6 +396,23 @@ mod tests {
         let err = design_decide("dsk-op", true, None).unwrap_err();
         assert!(!err.is_empty());
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn ws_create_makes_workspace_and_rejects_duplicate() {
+        let _serial = HOME_LOCK.lock().unwrap();
+        let home = std::env::temp_dir().join(format!("iw-dsk-new-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        std::env::set_var("HOME", &home);
+
+        assert_eq!(ws_create("  ").unwrap_err(), "empty_ws_id");
+        let root = ws_create("ui-ws").unwrap();
+        assert!(std::path::Path::new(&root).join("icewright.toml").exists());
+        // 重名由引擎报错（双语），列表可见
+        assert!(ws_create("ui-ws").unwrap_err().contains("ui-ws"));
+        assert!(Workspace::list().unwrap().contains(&"ui-ws".to_string()));
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[test]

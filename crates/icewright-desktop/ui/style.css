@@ -5,14 +5,34 @@
   :root { --line: #8886; --accent: #3b82f6;
     --btn-bg: #33363a; --arm-bg: #4a3c10; --arm-bd: #d0a92c; --arm-fg: #f0d060; --shadow: #0008; --warn: #f0b429; }
 }
+/* 手动主题覆盖：html[data-theme] 特异性高于 :root，压过系统偏好；color-scheme 同步切原生底色。 */
+:root[data-theme="light"] { color-scheme: light; --line: #8884; --accent: #2563eb;
+  --btn-bg: #fff; --arm-bg: #fff3cd; --arm-bd: #b58900; --arm-fg: #7a5c00; --shadow: #0002; --warn: #b45309; }
+:root[data-theme="dark"] { color-scheme: dark; --line: #8886; --accent: #3b82f6;
+  --btn-bg: #33363a; --arm-bg: #4a3c10; --arm-bd: #d0a92c; --arm-fg: #f0d060; --shadow: #0008; --warn: #f0b429; }
 * { box-sizing: border-box; }
-body { margin: 0; font-family: system-ui, "Segoe UI", sans-serif; font-size: 14px; }
+body { margin: 0; font-family: system-ui, "Segoe UI", sans-serif; font-size: 14px; background: Canvas; color: CanvasText; }
 /* 启动动画：窗口从 visible:false 亮相时播放一次淡入+微缩放。 */
 @keyframes boot-in { from { opacity: 0; transform: scale(.965) translateY(6px); } to { opacity: 1; transform: none; } }
 body { animation: boot-in .32s cubic-bezier(.2, .7, .3, 1) both; }
 .layout { display: flex; min-height: 100vh; }
-aside { width: 240px; border-right: 1px solid var(--line); padding: 16px; display: flex; flex-direction: column; gap: 8px; }
-aside h1 { font-size: 16px; margin: 0 0 8px; }
+aside { width: 240px; border-right: 1px solid var(--line); padding: 16px; display: flex; flex-direction: column; gap: 8px;
+  transition: width .18s ease, padding .18s ease; flex: none; }
+.aside-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.aside-head h1 { font-size: 16px; margin: 0; }
+.icon-btn { border: 1px solid var(--line); background: transparent; color: inherit; border-radius: 6px;
+  padding: 2px 8px; cursor: pointer; font-family: inherit; font-size: 12px; line-height: 1.4; }
+.icon-btn:hover { background: #8882; }
+.layout.collapsed aside { width: 56px; padding: 12px 8px; }
+.layout.collapsed aside > :not(.aside-head), .layout.collapsed .aside-head h1 { display: none; }
+.layout.collapsed .aside-head { justify-content: center; }
+.ws-new { display: flex; gap: 4px; }
+.ws-new input { flex: 1; min-width: 0; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px;
+  font-family: inherit; font-size: 12px; background: var(--btn-bg); color: inherit; }
+.ws-new button { flex: none; padding: 4px 10px; border: 1px solid var(--accent); color: var(--accent);
+  background: transparent; border-radius: 6px; font-family: inherit; font-size: 12px; cursor: pointer; }
+.ws-new button:hover { background: var(--accent); color: #fff; }
+.ws-note { font-size: 11.5px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
 .section-title { font-size: 12px; opacity: .7; text-transform: uppercase; }
 #ws-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 #ws-list li { padding: 8px 10px; border-radius: 8px; cursor: pointer; }
@@ -115,3 +135,14 @@ h3 { margin: 12px 0 8px; font-size: 14px; }
   background: transparent; border-radius: 6px; font-family: inherit; font-size: 12.5px; cursor: pointer; }
 .set-hint { font-size: 11px; opacity: .6; line-height: 1.5; }
 .set-status { font-size: 12px; min-height: 18px; color: var(--warn); white-space: pre-wrap; }
+/* 设置标签页：模型接入 / 语言 / 外观 */
+.set-tabs { display: flex; gap: 4px; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.set-tabs button { flex: 1; padding: 6px 4px; border: 1px solid var(--line); background: transparent; color: inherit;
+  border-radius: 6px; font-family: inherit; font-size: 12.5px; cursor: pointer; }
+.set-tabs button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.pane-label { font-size: 12px; opacity: .7; margin: 2px 0 4px; }
+.radio-group { display: flex; flex-direction: column; gap: 6px; margin: 2px 0 8px; }
+.radio-group label { display: flex; align-items: center; gap: 8px; font-size: 13px; margin: 0; opacity: 1; }
+@media (prefers-reduced-motion: reduce) {
+  aside { transition: none; }
+}

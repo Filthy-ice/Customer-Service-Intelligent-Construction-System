@@ -7,14 +7,22 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div class="layout">
+  <div class="layout" id="layout">
     <aside>
-      <h1>IceWright</h1>
+      <div class="aside-head">
+        <h1>IceWright</h1>
+        <button id="aside-toggle" class="icon-btn" type="button">◀</button>
+      </div>
       <div class="lang-toggle" id="lang-toggle">
         <button id="lang-zh" type="button">中文</button><button id="lang-en" type="button">EN</button>
       </div>
-      <button id="open-settings" class="link-btn" type="button" data-i18n="settings">模型设置…</button>
+      <button id="open-settings" class="link-btn" type="button" data-i18n="settings">设置…</button>
       <div class="section-title" data-i18n="workspaces">工作区</div>
+      <div class="ws-new">
+        <input id="ws-new-id" type="text" />
+        <button id="ws-create" type="button" data-i18n="ws_create">新建</button>
+      </div>
+      <div id="ws-note" class="ws-note hidden"></div>
       <ul id="ws-list"></ul>
       <div class="hint"><span data-i18n="hint_pre">运行</span>
         <code>icewright ws new &lt;id&gt;</code><span data-i18n="hint_post">创建新工作区</span>
@@ -59,20 +67,45 @@
   </div>
   <div id="settings-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="set-title">
     <div class="modal-card settings-card">
-      <h3 id="set-title" data-i18n="settings">模型设置</h3>
-      <label for="set-provider" data-i18n="set_provider">供应商</label>
-      <select id="set-provider"></select>
-      <label for="set-base" data-i18n="set_base">接入点 Base URL</label>
-      <input id="set-base" type="text" placeholder="https://api.example.com/v1" />
-      <label for="set-model" data-i18n="set_model">模型名</label>
-      <div class="set-row">
-        <input id="set-model" type="text" />
-        <button id="set-discover" type="button" data-i18n="set_discover">在线发现</button>
+      <h3 id="set-title" data-i18n="settings">设置</h3>
+      <div class="set-tabs">
+        <button id="tab-model" type="button" class="active" data-i18n="tab_model">模型接入</button>
+        <button id="tab-lang" type="button" data-i18n="tab_lang">语言</button>
+        <button id="tab-theme" type="button" data-i18n="tab_theme">外观</button>
       </div>
-      <select id="set-found" class="hidden"></select>
-      <label for="set-key" data-i18n="set_key">密钥引用</label>
-      <input id="set-key" type="text" placeholder="env://DEEPSEEK_API_KEY" />
-      <div class="set-hint" data-i18n="set_key_hint"></div>
+      <div id="pane-model">
+        <label for="set-provider" data-i18n="set_provider">供应商</label>
+        <select id="set-provider"></select>
+        <label for="set-base" data-i18n="set_base">接入点 Base URL</label>
+        <input id="set-base" type="text" placeholder="https://api.example.com/v1" />
+        <label for="set-model" data-i18n="set_model">模型名</label>
+        <div class="set-row">
+          <input id="set-model" type="text" />
+          <button id="set-discover" type="button" data-i18n="set_discover">在线发现</button>
+        </div>
+        <select id="set-found" class="hidden"></select>
+        <label for="set-key" data-i18n="set_key">密钥引用</label>
+        <input id="set-key" type="text" placeholder="env://DEEPSEEK_API_KEY" />
+        <div class="set-hint" data-i18n="set_key_hint"></div>
+      </div>
+      <div id="pane-lang" class="hidden">
+        <div class="pane-label" data-i18n="lang_label">界面语言</div>
+        <div class="radio-group">
+          <label><input type="radio" name="pref-lang" value="auto" /><span data-i18n="lang_auto">自动跟随工作区</span></label>
+          <label><input type="radio" name="pref-lang" value="zh" /><span>中文</span></label>
+          <label><input type="radio" name="pref-lang" value="en" /><span>English</span></label>
+        </div>
+        <div class="set-hint" data-i18n="lang_hint"></div>
+      </div>
+      <div id="pane-theme" class="hidden">
+        <div class="pane-label" data-i18n="theme_label">主题</div>
+        <div class="radio-group">
+          <label><input type="radio" name="pref-theme" value="auto" /><span data-i18n="theme_auto">跟随系统</span></label>
+          <label><input type="radio" name="pref-theme" value="light" /><span data-i18n="theme_light">浅色</span></label>
+          <label><input type="radio" name="pref-theme" value="dark" /><span data-i18n="theme_dark">深色</span></label>
+        </div>
+        <div class="set-hint" data-i18n="theme_hint"></div>
+      </div>
       <div id="set-status" class="set-status"></div>
       <div class="about-actions">
         <button id="set-save" type="button" class="primary" data-i18n="set_save">保存</button>
