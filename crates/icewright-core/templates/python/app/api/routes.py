@@ -33,7 +33,7 @@ _MSGID_PATTERN = r"^[A-Za-z0-9_.:-]{1,128}$"
 class ChatRequest(BaseModel):
     session_id: str = Field(min_length=1, max_length=128, pattern=_MSGID_PATTERN)
     message: str = Field(min_length=1, max_length=4000)
-    language: Literal["zh", "en"] = "zh"
+    language: Literal["zh", "en"] = "{{default_language}}"
     msgid: str | None = Field(default=None, pattern=_MSGID_PATTERN)
 
 

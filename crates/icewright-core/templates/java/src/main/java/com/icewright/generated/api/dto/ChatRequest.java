@@ -24,7 +24,7 @@ public class ChatRequest {
     private String message;
 
     @Pattern(regexp = "zh|en")
-    private String language = "zh";
+    private String language = "{{default_language}}";
 
     /** msgid 可选：同会话同 msgid 幂等只处理一次；字符集收紧以便安全进 Redis 键与 URL（三栈一致）。 */
     @JsonProperty("msgid")

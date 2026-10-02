@@ -64,7 +64,7 @@ def _call_model(message: str, injections: list[str], language: str) -> str:
     return asyncio.run(_agent_reply(message, injections, language))
 
 
-def answer(session_id: str, message: str, language: str = "zh") -> dict:
+def answer(session_id: str, message: str, language: str = "{{default_language}}") -> dict:
     lang = i18n.normalize(language)
     rules = rule_engine.load_rules()
     slots = session_service.load_slots(session_id)

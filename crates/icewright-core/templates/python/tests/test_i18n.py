@@ -12,7 +12,7 @@ def test_all_languages_cover_same_keys():
 
 def test_unknown_language_falls_back_to_default():
     assert i18n.normalize("fr") == i18n.DEFAULT_LANGUAGE
-    assert i18n.t("takeover", "fr", rule="R-X") == i18n.t("takeover", "zh", rule="R-X")
+    assert i18n.t("takeover", "fr", rule="R-X") == i18n.t("takeover", "{{default_language}}", rule="R-X")
 
 
 def test_t_formats_params_per_language():
@@ -28,7 +28,7 @@ def test_chat_request_validates_language():
 
     from app.api import routes
 
-    assert routes.ChatRequest(session_id="s", message="hi").language == "zh"
+    assert routes.ChatRequest(session_id="s", message="hi").language == "{{default_language}}"
     assert routes.ChatRequest(session_id="s", message="hi", language="en").language == "en"
     with pytest.raises(pydantic.ValidationError):
         routes.ChatRequest(session_id="s", message="hi", language="de")

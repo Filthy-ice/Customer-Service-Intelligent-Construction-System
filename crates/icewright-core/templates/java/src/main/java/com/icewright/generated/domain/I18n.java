@@ -13,7 +13,7 @@ import java.util.TreeSet;
  */
 public final class I18n {
 
-    public static final String DEFAULT_LANGUAGE = "zh";
+    public static final String DEFAULT_LANGUAGE = "{{default_language}}";
 
     private static final Map<String, Map<String, String>> MESSAGES = Map.of(
         "zh", Map.of(

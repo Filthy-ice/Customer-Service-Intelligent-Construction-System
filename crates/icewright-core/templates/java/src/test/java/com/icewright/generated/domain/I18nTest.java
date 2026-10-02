@@ -30,11 +30,11 @@ class I18nTest {
 
     @Test
     void unknownLanguageFallsBackToDefault() {
-        assertEquals(I18n.t("transfer", "zh"), I18n.t("transfer", "de"));
-        assertEquals(I18n.t("transfer", "zh"), I18n.t("transfer", null));
+        assertEquals(I18n.t("transfer", "{{default_language}}"), I18n.t("transfer", "de"));
+        assertEquals(I18n.t("transfer", "{{default_language}}"), I18n.t("transfer", null));
         assertEquals("en", I18n.normalize(" EN "));
         assertEquals("en", I18n.normalize("EN"));
-        assertEquals("zh", I18n.normalize("fr"));
+        assertEquals("{{default_language}}", I18n.normalize("fr"));
     }
 
     @Test

@@ -38,7 +38,7 @@ pub fn render_design(ws: &Workspace) -> Result<String> {
     out.push_str("## 1. 系统概览\n\n");
     out.push_str(&format!("- 行业包：{}\n", nv(&cfg.workspace.pack)));
     out.push_str(&format!("- 目标栈：{}\n", cfg.workspace.stack));
-    out.push_str("- 前端语言：zh / en（生成项目自带聊天页面，访客可切换；未知语言回退 zh）\n");
+    out.push_str("- 前端语言：zh / en（生成项目自带聊天页面，访客可切换；默认语言取需求摄入时选定的模型操作语言，未知语言回退该默认值）\n");
     out.push_str(&format!(
         "- 页面矩阵：/ 开发调试聊天页（必含，含规则命中与会话槽位回显）、/admin 开发后台（必含，只读规则/技能/接口契约/运行态，不落业务数据）、/console 业务人员后台（{}）\n",
         if cfg.workspace.business_console {

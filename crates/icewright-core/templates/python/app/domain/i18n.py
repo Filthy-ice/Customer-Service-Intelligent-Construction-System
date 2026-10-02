@@ -22,7 +22,7 @@ MESSAGES = {
     },
 }
 
-DEFAULT_LANGUAGE = "zh"
+DEFAULT_LANGUAGE = "{{default_language}}"
 
 
 def normalize(language: str) -> str:

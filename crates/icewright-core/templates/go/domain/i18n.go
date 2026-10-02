@@ -8,7 +8,7 @@ import (
 )
 
 // DefaultLanguage 是未知/空语言时的回退值。
-const DefaultLanguage = "zh"
+const DefaultLanguage = "{{default_language}}"
 
 var messages = map[string]map[string]string{
 	"zh": {

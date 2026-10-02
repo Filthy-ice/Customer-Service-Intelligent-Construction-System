@@ -9,11 +9,11 @@ import (
 
 func TestNormalizeLanguage(t *testing.T) {
 	cases := map[string]string{
-		"":      "zh",
+		"":      "{{default_language}}",
 		"zh":    "zh",
 		" EN ":  "en",
-		"en-US": "zh", // 未知语种回退默认，绝不抛错
-		"de":    "zh",
+		"en-US": "{{default_language}}", // 未知语种回退默认，绝不抛错
+		"de":    "{{default_language}}",
 	}
 	for in, want := range cases {
 		if got := Normalize(in); got != want {

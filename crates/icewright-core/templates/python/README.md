@@ -14,7 +14,7 @@
 #   若闸门A 设计开启了业务后台（workspace.business_console），还有 http://127.0.0.1:8000/console
 #   业务人员后台：列出命中拦截/转人工/禁语规则的待关注会话。
 #   curl -X POST localhost:8000/chat -H 'content-type: application/json' \
-#     -d '{"session_id":"s1","message":"我的案子CLM-0001材料齐了吗","language":"zh"}'
+#     -d '{"session_id":"s1","message":"我的案子CLM-0001材料齐了吗","language":"{{default_language}}"}'
 #   curl -X POST localhost:8000/chat -H 'content-type: application/json' \
 #     -d '{"session_id":"s1","message":"Is my claim CLM-0001 ready?","language":"en"}'
 #   非实时交互（三栈同形契约）：/chat 可选 msgid——同会话同 msgid 幂等只处理一次；

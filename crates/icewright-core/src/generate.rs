@@ -417,6 +417,7 @@ struct Slots {
     engine_version: String,
     artifact_id: String,
     business_console: String,
+    default_language: String,
 }
 
 /// 渲染槽位；若仍残留 `{{`，说明模板/槽位表不同步——宁可失败不可写出半截占位符。
@@ -426,7 +427,8 @@ fn render(tpl: &str, rel: &str, slots: &Slots) -> Result<String> {
         .replace("{{pack_ref}}", &slots.pack_ref)
         .replace("{{engine_version}}", &slots.engine_version)
         .replace("{{artifact_id}}", &slots.artifact_id)
-        .replace("{{business_console}}", &slots.business_console);
+        .replace("{{business_console}}", &slots.business_console)
+        .replace("{{default_language}}", &slots.default_language);
     if let Some(pos) = out.find("{{") {
         let around = &out[pos..out.len().min(pos + 40)];
         bail!("{}", t!("tpl_undefined_slot", rel, format!("{around:?}")));
@@ -588,6 +590,9 @@ pub fn generate(ws: &Workspace, out_dir: &Path) -> Result<GenerateReport> {
         pack_ref,
         engine_version: ENGINE_VERSION.to_string(),
         business_console: cfg.workspace.business_console.to_string(),
+        default_language: crate::i18n::ModelLang::resolve(&cfg.workspace.model_lang)
+            .as_str()
+            .to_string(),
     };
 
     /// 一轮生成的累积结果：分类 diff、哈希材料、引擎管理文件清单。
@@ -1264,6 +1269,45 @@ mod tests {
         let report2 = generate(&ws, &out).unwrap();
         assert!(report2.preserved.is_empty(), "{:?}", report2.preserved);
         assert_eq!(report.output_hash, report2.output_hash);
+    }
+
+    #[test]
+    fn default_language_slot_follows_model_lang() {
+        for (ws_id, stack, i18n_rel, marker) in [
+            (
+                "langpy",
+                "python",
+                "app/domain/i18n.py",
+                "DEFAULT_LANGUAGE = \"en\"",
+            ),
+            (
+                "langjava",
+                "java",
+                "src/main/java/com/icewright/generated/domain/I18n.java",
+                "DEFAULT_LANGUAGE = \"en\";",
+            ),
+            (
+                "langgo",
+                "go",
+                "domain/i18n.go",
+                "const DefaultLanguage = \"en\"",
+            ),
+        ] {
+            let ws = setup(ws_id);
+            let cfg_path = ws.root.join("icewright.toml");
+            let raw = std::fs::read_to_string(&cfg_path)
+                .unwrap()
+                .replace("stack = \"python\"", &format!("stack = \"{stack}\""))
+                .replace("model_lang = \"\"", "model_lang = \"en\"");
+            std::fs::write(&cfg_path, raw).unwrap();
+            let out = ws.root.join("output");
+            generate(&ws, &out).unwrap();
+            let rendered = std::fs::read_to_string(out.join(i18n_rel)).unwrap();
+            assert!(
+                rendered.contains(marker),
+                "{stack} 栈 {i18n_rel} 未按 model_lang 渲染默认语言"
+            );
+        }
     }
 
     #[test]
