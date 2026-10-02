@@ -1,3 +1,4 @@
+use crate::t;
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -90,7 +91,7 @@ fn builtin() -> Vec<Provider> {
 pub fn overrides_path() -> Result<PathBuf> {
     let home = std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
-        .context("无法确定用户主目录")?;
+        .context(t!("no_home"))?;
     Ok(PathBuf::from(home)
         .join(".icewright")
         .join("providers.json"))
@@ -100,9 +101,8 @@ fn load_overrides_file(path: &Path) -> Result<Vec<Provider>> {
     if !path.exists() {
         return Ok(Vec::new());
     }
-    let raw = std::fs::read_to_string(path)
-        .with_context(|| format!("无法读取供应商覆盖文件 {}", path.display()))?;
-    parse_overrides(&raw).with_context(|| format!("供应商覆盖文件格式错误 {}", path.display()))
+    let raw = std::fs::read_to_string(path).with_context(|| t!("pov_read", path.display()))?;
+    parse_overrides(&raw).with_context(|| t!("pov_parse", path.display()))
 }
 
 /// 覆盖文件形态：`{"providers": [ {name, display, base_url, docs_url, default_model, key_envs?} ]}`
@@ -114,7 +114,7 @@ fn parse_overrides(raw: &str) -> Result<Vec<Provider>> {
     } else if let Some(a) = v.get("providers").and_then(|p| p.as_array()) {
         a.clone()
     } else {
-        bail!("需要顶层数组或 {{\"providers\": [...]}}");
+        bail!("{}", t!("providers_shape"));
     };
     serde_json::from_value::<Vec<Provider>>(Value::Array(arr)).context(
         "providers 条目不符合结构（name/display/base_url/docs_url/default_model[/key_envs]）",
@@ -142,7 +142,7 @@ pub fn find(name: &str) -> Result<Provider> {
     catalog()?
         .into_iter()
         .find(|p| p.name == name)
-        .with_context(|| format!("未知供应商 {name:?}，可用 `icewright model providers` 查看列表"))
+        .with_context(|| t!("pov_unknown", format!("{name:?}")))
 }
 
 /// GET {base}/models 的响应解析：兼容 {"data":[{id}]} 与裸 [{id}] 两种形态。
@@ -170,11 +170,11 @@ pub fn list_models(base_url: &str, api_key: &str, timeout: Duration) -> Result<V
         .get(&url)
         .set("Authorization", &format!("Bearer {api_key}"))
         .call()
-        .with_context(|| format!("模型列表请求失败 {url}（端点不可达或密钥无效）"))?;
-    let value: Value = resp.into_json().context("端点返回的不是合法 JSON")?;
+        .with_context(|| t!("pov_list_failed", url))?;
+    let value: Value = resp.into_json().context(t!("providers_not_json"))?;
     let ids = extract_model_ids(&value);
     if ids.is_empty() {
-        bail!("端点可达但未解析出任何模型 id，请检查返回结构或手动填写模型名");
+        bail!("{}", t!("providers_no_models"));
     }
     Ok(ids)
 }

@@ -1,3 +1,4 @@
+use crate::t;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -133,7 +134,7 @@ pub fn record_stage_usage(st: &mut PipelineState, id: StageId, usage: StageUsage
         .stages
         .iter_mut()
         .find(|s| s.id == id)
-        .with_context(|| format!("未知阶段 {id:?}"))?;
+        .with_context(|| t!("stage_unknown", format!("{id:?}")))?;
     match &mut stage.usage {
         Some(existing) => {
             existing.accumulate(

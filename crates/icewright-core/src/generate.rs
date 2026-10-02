@@ -1,6 +1,7 @@
 //! S5 代码生成：确定性骨架模板 + 槽位渲染，闸门A未生效则拒绝生成。
 use crate::extract::RULES_ARTIFACT;
 use crate::state::{self, StageId, StageStatus};
+use crate::t;
 use crate::workspace::Workspace;
 use anyhow::{bail, Context, Result};
 use chrono::Utc;
@@ -358,7 +359,7 @@ fn render(tpl: &str, rel: &str, slots: &Slots) -> Result<String> {
         .replace("{{business_console}}", &slots.business_console);
     if let Some(pos) = out.find("{{") {
         let around = &out[pos..out.len().min(pos + 40)];
-        bail!("模板 {rel} 含未定义槽位: {around:?}");
+        bail!("{}", t!("tpl_undefined_slot", rel, format!("{around:?}")));
     }
     Ok(out)
 }
@@ -413,19 +414,19 @@ fn has_custom_marker(path: &Path) -> bool {
 pub fn generate(ws: &Workspace, out_dir: &Path) -> Result<GenerateReport> {
     let state_path = ws.state_path();
     if !state_path.exists() {
-        bail!("请先 `icewright pipeline init {}`", ws.id);
+        bail!("{}", t!("need_init", &ws.id));
     }
     let mut st = state::load_state(&state_path)?;
     if !st.gate_is_current(StageId::S4) {
-        bail!("闸门A未生效：请先 `icewright design render` 并由 `icewright design approve` 确认；任何产物变更后需重新确认");
+        bail!("{}", t!("gate_a_not_active"));
     }
 
     let rules_raw = std::fs::read_to_string(ws.artifact_path(RULES_ARTIFACT))
-        .context("缺少 artifacts/rules.json，请先完成 S3 规则提取")?;
+        .context(t!("missing_rules_artifact"))?;
     let rules: Value = serde_json::from_str(&rules_raw)?;
     let errors = icewright_artifact::validate_instance("rules", &rules)?;
     if !errors.is_empty() {
-        bail!("rules.json 违反契约，拒绝生成：{errors:?}");
+        bail!("{}", t!("rules_contract_violation", format!("{errors:?}")));
     }
 
     // 契约硬闸：接口存在性须由客户技术侧逐条确认后才可进 S5（模型一律输出 false）
@@ -468,7 +469,7 @@ pub fn generate(ws: &Workspace, out_dir: &Path) -> Result<GenerateReport> {
         let skills: Value = serde_json::from_str(&raw)?;
         let errors = icewright_artifact::validate_instance("skills", &skills)?;
         if !errors.is_empty() {
-            bail!("skills.json 违反契约，拒绝生成：{errors:?}");
+            bail!("{}", t!("skills_contract_violation", format!("{errors:?}")));
         }
         let pending: Vec<&str> = skills["skills"]
             .as_array()

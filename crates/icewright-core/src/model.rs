@@ -1,4 +1,5 @@
 use crate::config::ModelCfg;
+use crate::t;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -61,11 +62,11 @@ pub fn chat(
         .post(&url)
         .set("Authorization", &format!("Bearer {api_key}"))
         .send_json(body)
-        .with_context(|| format!("模型端点请求失败 {url}"))?;
-    let value: serde_json::Value = resp.into_json().context("模型端点返回的不是合法 JSON")?;
+        .with_context(|| t!("model_req_failed", url))?;
+    let value: serde_json::Value = resp.into_json().context(t!("model_not_json"))?;
     let content = value["choices"][0]["message"]["content"]
         .as_str()
-        .context("响应缺少 choices[0].message.content")?
+        .context(t!("model_no_content"))?
         .to_string();
     Ok(ChatOutcome {
         model: value["model"]

@@ -1,3 +1,4 @@
+use crate::t;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -93,26 +94,24 @@ impl Default for MysqlCfg {
 }
 
 pub fn load(path: &Path) -> Result<Config> {
-    let raw = std::fs::read_to_string(path)
-        .with_context(|| format!("无法读取配置 {}", path.display()))?;
-    toml::from_str(&raw).with_context(|| format!("配置格式错误 {}", path.display()))
+    let raw = std::fs::read_to_string(path).with_context(|| t!("config_read", path.display()))?;
+    toml::from_str(&raw).with_context(|| t!("config_parse", path.display()))
 }
 
 /// 按点号路径（如 `model.base_url`）写入配置并回读校验。
 /// 返回写入后的有效配置；未知键会被 `deny_unknown_fields` 拒绝。
 pub fn set_and_save(path: &Path, key: &str, value: &str) -> Result<Config> {
-    let raw = std::fs::read_to_string(path)
-        .with_context(|| format!("无法读取配置 {}", path.display()))?;
+    let raw = std::fs::read_to_string(path).with_context(|| t!("config_read", path.display()))?;
     let mut root: toml::Value =
-        toml::from_str(&raw).with_context(|| format!("配置格式错误 {}", path.display()))?;
+        toml::from_str(&raw).with_context(|| t!("config_parse", path.display()))?;
     let mut cur = &mut root;
     for seg in key.split('.') {
         if seg.is_empty() {
-            anyhow::bail!("配置键不允许包含空路径段: {key:?}");
+            anyhow::bail!("{}", t!("config_empty_seg", format!("{key:?}")));
         }
         let tbl = cur
             .as_table_mut()
-            .with_context(|| format!("配置键 {key:?} 的上级不是表"))?;
+            .with_context(|| t!("config_parent_not_table", format!("{key:?}")))?;
         cur = tbl
             .entry(seg)
             .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
@@ -121,7 +120,7 @@ pub fn set_and_save(path: &Path, key: &str, value: &str) -> Result<Config> {
     let new_raw = toml::to_string_pretty(&root)?;
     // 先校验再落盘，避免未知键写进配置文件。
     let cfg: Config = toml::from_str(&new_raw)
-        .with_context(|| format!("配置键 {key:?} 不在允许列表中，未写入"))?;
+        .with_context(|| t!("config_key_not_allowed", format!("{key:?}")))?;
     std::fs::write(path, new_raw)?;
     Ok(cfg)
 }

@@ -1,6 +1,7 @@
 //! 生成历史：引擎每次完成有状态推进的动作，向 pipeline/history.jsonl 追加一行事件。
 //! 供流程监控与审计回看；该文件属于 workspace 运行数据，不进版本库。
 
+use crate::t;
 use std::fs::OpenOptions;
 use std::io::Write;
 
@@ -35,7 +36,7 @@ pub fn record(ws: &Workspace, stage: &str, detail: &str) -> Result<()> {
         .create(true)
         .append(true)
         .open(&p)
-        .with_context(|| format!("历史文件不可写: {}", p.display()))?;
+        .with_context(|| t!("history_write", p.display()))?;
     writeln!(file, "{line}")?;
     Ok(())
 }
@@ -46,8 +47,7 @@ pub fn tail(ws: &Workspace, n: usize) -> Result<Vec<Event>> {
     if !p.exists() {
         return Ok(Vec::new());
     }
-    let raw =
-        std::fs::read_to_string(&p).with_context(|| format!("历史文件不可读: {}", p.display()))?;
+    let raw = std::fs::read_to_string(&p).with_context(|| t!("history_read", p.display()))?;
     let mut out = Vec::new();
     for line in raw.lines() {
         let line = line.trim();

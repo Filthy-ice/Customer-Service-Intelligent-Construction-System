@@ -1,4 +1,5 @@
 use crate::config::{self, Config};
+use crate::t;
 use anyhow::{bail, Context, Result};
 use std::path::{Path, PathBuf};
 
@@ -42,14 +43,14 @@ fn check_id(id: &str) -> Result<()> {
     if ok {
         Ok(())
     } else {
-        bail!("workspace id 只允许小写字母/数字/-/_，收到: {id:?}")
+        bail!("{}", t!("ws_id_invalid", format!("{id:?}")))
     }
 }
 
 pub fn base_dir() -> Result<PathBuf> {
     let home = std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
-        .context("无法确定用户主目录（HOME/USERPROFILE）")?;
+        .context(t!("no_home"))?;
     Ok(PathBuf::from(home).join(".icewright").join("workspaces"))
 }
 
@@ -83,7 +84,7 @@ impl Workspace {
         check_id(id)?;
         let root = base.join(id);
         if root.exists() {
-            bail!("workspace 已存在: {}", root.display());
+            bail!("{}", t!("ws_exists", root.display()));
         }
         for dir in [
             "corpus",
@@ -122,7 +123,7 @@ impl Workspace {
         check_id(id)?;
         let root = base.join(id);
         if !root.join("icewright.toml").exists() {
-            bail!("workspace 不存在或未初始化: {}", root.display());
+            bail!("{}", t!("ws_missing", root.display()));
         }
         Ok(Self {
             id: id.to_string(),

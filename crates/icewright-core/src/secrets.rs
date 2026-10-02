@@ -1,3 +1,4 @@
+use crate::t;
 use anyhow::{bail, Context, Result};
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -17,12 +18,10 @@ pub enum SecretRef {
 impl SecretRef {
     pub fn parse(s: &str) -> Result<Self> {
         if let Some(rest) = s.strip_prefix("keyring://") {
-            let (service, account) = rest
-                .split_once('/')
-                .context("格式应为 keyring://<service>/<account>")?;
+            let (service, account) = rest.split_once('/').context(t!("secret_keyring_format"))?;
             let check = |v: &str, what: &str| -> Result<()> {
                 if v.is_empty() {
-                    bail!("{what} 不能为空");
+                    bail!("{}", t!("secret_empty_field", what));
                 }
                 Ok(())
             };
@@ -38,10 +37,10 @@ impl SecretRef {
                 })
             };
             if !ok(service) {
-                bail!("service 只允许字母数字/-/_/. : {service:?}");
+                bail!("{}", t!("secret_service_chars", format!("{service:?}")));
             }
             if !ok(account) {
-                bail!("account 只允许字母数字/-/_/. 及分段 / : {account:?}");
+                bail!("{}", t!("secret_account_chars", format!("{account:?}")));
             }
             return Ok(Self::Keyring {
                 service: service.to_string(),
@@ -53,7 +52,7 @@ impl SecretRef {
                 || !var.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
                 || !var.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
             {
-                bail!("环境变量名不合法: {var:?}（需匹配 [A-Za-z_][A-Za-z0-9_]*）");
+                bail!("{}", t!("secret_env_name", format!("{var:?}")));
             }
             return Ok(Self::Env {
                 var: var.to_string(),
@@ -61,13 +60,13 @@ impl SecretRef {
         }
         if let Some(secret) = s.strip_prefix("plain:") {
             if secret.trim().is_empty() {
-                bail!("plain: 引用缺少密钥本体");
+                bail!("{}", t!("secret_plain_missing"));
             }
             return Ok(Self::Plain {
                 secret: secret.to_string(),
             });
         }
-        bail!("密钥引用必须以 keyring:// 、env:// 或 plain: 开头: {s:?}")
+        bail!("{}", t!("secret_ref_prefix", format!("{s:?}")))
     }
 
     /// 展示用串。明文引用永不回显内容。
@@ -96,7 +95,7 @@ impl SecretRef {
 pub fn secrets_root() -> Result<PathBuf> {
     let home = std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
-        .context("无法确定用户主目录")?;
+        .context(t!("no_home"))?;
     Ok(PathBuf::from(home).join(".icewright").join("secrets"))
 }
 
@@ -108,7 +107,7 @@ fn file_for(root: &Path, r: &SecretRef) -> PathBuf {
 /// 存密钥到 keyring 后端。其他引用类型不接受 store（它们本就有值）。
 pub fn store_at(root: &Path, r: &SecretRef, secret: &str) -> Result<()> {
     if r.storage_path().is_none() {
-        bail!("仅 keyring:// 引用支持软件代存；env:///plain: 无需存储");
+        bail!("{}", t!("secret_store_kind"));
     }
     let path = file_for(root, r);
     std::fs::create_dir_all(path.parent().unwrap())?;
@@ -142,9 +141,7 @@ pub fn store(r: &SecretRef, secret: &str) -> Result<StoreBackend> {
 }
 
 fn store_in(root: &Path, r: &SecretRef, secret: &str) -> Result<StoreBackend> {
-    let (service, account) = r
-        .storage_path()
-        .with_context(|| "仅 keyring:// 引用支持软件代存；env:///plain: 无需存储")?;
+    let (service, account) = r.storage_path().with_context(|| t!("secret_store_kind"))?;
     match native_set(service, account, secret) {
         Ok(()) => {
             // 原生后端接管后清掉旧文件回退，避免过期密钥被误读
@@ -188,10 +185,11 @@ pub fn resolve_at(root: &Path, r: &SecretRef) -> Result<String> {
     match r {
         SecretRef::Keyring { .. } => {
             let path = file_for(root, r);
-            std::fs::read_to_string(&path).with_context(|| format!("密钥不存在: {}", r.to_uri()))
+            std::fs::read_to_string(&path).with_context(|| t!("sec_missing", r.to_uri()))
         }
-        SecretRef::Env { var } => std::env::var(var)
-            .with_context(|| format!("环境变量 {var} 未设置或为空（引用 {}）", r.to_uri())),
+        SecretRef::Env { var } => {
+            std::env::var(var).with_context(|| t!("sec_env_unset", var, r.to_uri()))
+        }
         SecretRef::Plain { secret } => Ok(secret.clone()),
     }
 }
@@ -206,8 +204,7 @@ pub(crate) fn resolve_in(root: &Path, r: &SecretRef) -> Result<String> {
         if let Ok(Some(secret)) = native_get(service, account) {
             return Ok(secret);
         }
-        return resolve_at(root, r)
-            .with_context(|| format!("系统 keyring 与文件回退均未找到：{}", r.to_uri()));
+        return resolve_at(root, r).with_context(|| t!("sec_nowhere", r.to_uri()));
     }
     resolve_at(root, r)
 }
@@ -215,9 +212,7 @@ pub(crate) fn resolve_in(root: &Path, r: &SecretRef) -> Result<String> {
 /// 删除 keyring:// 引用的软件代存副本（原生后端与文件回退两处）。
 /// 返回 (原生侧原有, 文件侧原有)；引用不合法或类型不支持时报错。
 pub fn remove(r: &SecretRef) -> Result<(bool, bool)> {
-    let (service, account) = r
-        .storage_path()
-        .context("仅 keyring:// 引用有软件代存副本可删；env:///plain: 无需删除")?;
+    let (service, account) = r.storage_path().context(t!("secret_delete_kind"))?;
     let native_removed = match keyring::Entry::new(service, account) {
         Ok(entry) => entry.delete_credential().is_ok(),
         Err(_) => false,
@@ -232,10 +227,10 @@ pub fn read_secret_from_stdin() -> Result<String> {
     let mut buf = String::new();
     std::io::stdin()
         .read_to_string(&mut buf)
-        .context("从 stdin 读取密钥失败")?;
+        .context(t!("secret_stdin_read"))?;
     let secret = buf.trim_end_matches(['\n', '\r']);
     if secret.is_empty() {
-        bail!("stdin 为空：请通过管道/粘贴输入密钥，命令行参数不允许明文密钥");
+        bail!("{}", t!("secret_stdin_empty"));
     }
     Ok(secret.to_string())
 }

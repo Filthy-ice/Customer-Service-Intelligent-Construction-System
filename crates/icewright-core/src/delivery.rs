@@ -2,6 +2,7 @@
 use crate::config::Config;
 use crate::extract::RULES_ARTIFACT;
 use crate::state::{self, GateDecision, GateRecord, GateRole, StageId, StageStatus};
+use crate::t;
 use crate::workspace::Workspace;
 use anyhow::{bail, Context, Result};
 use chrono::Utc;
@@ -194,7 +195,7 @@ fn render_report(ws: &Workspace, cfg: &Config, st: &state::PipelineState) -> Res
 pub fn publish(ws: &Workspace) -> Result<(String, bool)> {
     let path = ws.state_path();
     if !path.exists() {
-        bail!("请先 `icewright pipeline init {}`", ws.id);
+        bail!("{}", t!("need_init", &ws.id));
     }
     let mut st = state::load_state(&path)?;
     if st.stage(StageId::S6).unwrap().status != StageStatus::Approved {
@@ -237,13 +238,13 @@ pub fn decide(
     note: Option<&str>,
 ) -> Result<()> {
     let path = ws.state_path();
-    let mut st = state::load_state(&path).context("尚无 pipeline 状态，无法验收")?;
+    let mut st = state::load_state(&path).context(t!("delivery_no_state"))?;
     {
         let s7 = st
             .stages
             .iter()
             .find(|s| s.id == StageId::S7)
-            .context("S7 不存在")?;
+            .context(t!("s7_missing"))?;
         if s7.status != StageStatus::WaitingGate {
             bail!(
                 "S7 当前 {:?}，只有 waiting_gate 可决策（先 `icewright delivery render {}`）",
@@ -253,7 +254,7 @@ pub fn decide(
         }
     }
     if decision == GateDecision::Rejected && note.map(|n| n.trim().is_empty()).unwrap_or(true) {
-        bail!("驳回必须附注原因（--note）");
+        bail!("{}", t!("reject_needs_note"));
     }
     let now = Utc::now();
     let out_hash = st

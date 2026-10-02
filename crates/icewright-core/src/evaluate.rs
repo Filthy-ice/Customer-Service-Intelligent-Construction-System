@@ -4,6 +4,7 @@ use crate::extract::{CallOutcome, RULES_ARTIFACT};
 use crate::model::ChatMessage;
 use crate::secrets;
 use crate::state::{self, StageId, StageStatus, StageUsage};
+use crate::t;
 use crate::workspace::Workspace;
 use anyhow::{bail, Context, Result};
 use chrono::Utc;
@@ -82,8 +83,8 @@ fn post_chat(base_url: &str, session_id: &str, message: &str) -> Result<String> 
     let resp = agent
         .post(&url)
         .send_json(json!({"session_id": session_id, "message": message}))
-        .with_context(|| format!("POST {url} 失败"))?;
-    let body: Value = resp.into_json().context("响应不是合法 JSON")?;
+        .with_context(|| t!("eval_post_failed", url))?;
+    let body: Value = resp.into_json().context(t!("eval_not_json"))?;
     Ok(body["reply"].as_str().unwrap_or_default().to_string())
 }
 
@@ -335,18 +336,22 @@ pub fn evaluate<J: FnMut(&[ChatMessage]) -> Result<CallOutcome>>(
 ) -> Result<Vec<CaseOutcome>> {
     let state_path = ws.state_path();
     if !state_path.exists() {
-        bail!("请先 `icewright pipeline init {}`", ws.id);
+        bail!("{}", t!("need_init", &ws.id));
     }
     let st = state::load_state(&state_path)?;
     if st.stage(StageId::S5).map(|s| s.status) != Some(StageStatus::Approved) {
-        bail!("S5 未批准，禁止评测回放：先 `icewright generate {}`", ws.id);
+        bail!("{}", t!("eval_s5_not_approved", &ws.id));
     }
-    let raw = std::fs::read_to_string(ws.artifact_path(EVAL_ARTIFACT))
-        .with_context(|| format!("缺少 {}", ws.artifact_path(EVAL_ARTIFACT).display()))?;
+    let raw = std::fs::read_to_string(ws.artifact_path(EVAL_ARTIFACT)).with_context(|| {
+        t!(
+            "eval_cases_missing",
+            ws.artifact_path(EVAL_ARTIFACT).display()
+        )
+    })?;
     let suite: Value = serde_json::from_str(&raw)?;
     let errors = icewright_artifact::validate_instance("eval-cases", &suite)?;
     if !errors.is_empty() {
-        bail!("评测用例集违反契约：{errors:?}");
+        bail!("{}", t!("eval_contract_violation", format!("{errors:?}")));
     }
     let rules = rule_texts(ws);
     let cases = suite["cases"].as_array().cloned().unwrap_or_default();

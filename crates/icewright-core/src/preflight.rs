@@ -1,5 +1,6 @@
 use crate::secrets::{self, SecretRef};
 use crate::state::{self, PipelineState, StageId, StageStatus};
+use crate::t;
 use crate::workspace::Workspace;
 use anyhow::Result;
 use chrono::Utc;
@@ -254,7 +255,7 @@ pub fn run_and_record(ws: &Workspace, secrets_root: &Path) -> Result<(Vec<Check>
     let path = ws.state_path();
     let mut st = match load_or_init(ws)? {
         Some(st) => st,
-        None => anyhow::bail!("请先 `icewright pipeline init {}`", ws.id),
+        None => anyhow::bail!("{}", t!("need_init", &ws.id)),
     };
 
     let now = Utc::now();

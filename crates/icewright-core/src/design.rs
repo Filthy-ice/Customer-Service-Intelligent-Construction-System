@@ -2,6 +2,7 @@ use crate::config::Config;
 use crate::extract::RULES_ARTIFACT;
 use crate::secrets::SecretRef;
 use crate::state::{self, GateDecision, GateRecord, GateRole, StageId, StageStatus};
+use crate::t;
 use crate::workspace::Workspace;
 use anyhow::{bail, Context, Result};
 use chrono::Utc;
@@ -28,11 +29,8 @@ fn mask_endpoint(base_url: &str) -> String {
 /// 确定性渲染设计文档（不调用模型）：S5 生成前闸门A 的审阅对象。
 pub fn render_design(ws: &Workspace) -> Result<String> {
     let cfg = ws.config()?;
-    let rules =
-        load_json(ws, RULES_ARTIFACT)?.context("缺少 artifacts/rules.json，先跑 S3 提取")?;
-    let rules_arr = rules["rules"]
-        .as_array()
-        .context("rules.json 结构异常：rules 不是数组")?;
+    let rules = load_json(ws, RULES_ARTIFACT)?.context(t!("missing_rules_artifact"))?;
+    let rules_arr = rules["rules"].as_array().context(t!("rules_not_array"))?;
 
     let mut by_enforcement: BTreeMap<&str, usize> = BTreeMap::new();
     let mut out = String::new();
@@ -352,11 +350,11 @@ fn key_ref_display(cfg: &Config) -> String {
 pub fn publish(ws: &Workspace) -> Result<(String, bool)> {
     let path = ws.state_path();
     if !path.exists() {
-        bail!("请先 `icewright pipeline init {}`", ws.id);
+        bail!("{}", t!("need_init", &ws.id));
     }
     let mut st = state::load_state(&path)?;
     if st.stage(StageId::S3).unwrap().status != StageStatus::Approved {
-        bail!("S3 未完成，无法渲染设计文档");
+        bail!("{}", t!("design_s3_incomplete"));
     }
     let md = render_design(ws)?;
     let artifact = ws.artifact_path(DESIGN_DOC);
@@ -391,21 +389,20 @@ pub fn decide(
     note: Option<&str>,
 ) -> Result<()> {
     let path = ws.state_path();
-    let mut st =
-        state::load_state(&path).context("请先 `icewright design render`（S4 尚无产物）")?;
+    let mut st = state::load_state(&path).context(t!("design_render_first"))?;
     if decision == GateDecision::Rejected && note.map(|n| n.trim().is_empty()).unwrap_or(true) {
-        bail!("驳回必须附注原因（--note）");
+        bail!("{}", t!("reject_needs_note"));
     }
     let now = Utc::now();
     let s = st
         .stages
         .iter_mut()
         .find(|s| s.id == StageId::S4)
-        .context("状态缺少 S4")?;
+        .context(t!("s4_missing"))?;
     if s.status != StageStatus::WaitingGate {
-        bail!("S4 当前状态为 {:?}，不在等待确认", s.status);
+        bail!("{}", t!("s4_not_waiting", format!("{:?}", s.status)));
     }
-    let artifact_hash = s.output_hash.clone().context("S4 缺少 output_hash")?;
+    let artifact_hash = s.output_hash.clone().context(t!("s4_no_hash"))?;
     s.gate = Some(GateRecord {
         decision,
         by: by.to_string(),

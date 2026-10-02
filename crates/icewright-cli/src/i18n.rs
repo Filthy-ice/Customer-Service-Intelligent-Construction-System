@@ -8,7 +8,10 @@ static IS_EN: AtomicBool = AtomicBool::new(false);
 
 /// 仅 "en"（忽略大小写/空白）切到英文，其余一律中文（宽容回退，不让语言配置阻断命令）。
 pub fn set_locale(raw: &str) {
-    IS_EN.store(raw.trim().eq_ignore_ascii_case("en"), Ordering::Relaxed);
+    let en = raw.trim().eq_ignore_ascii_case("en");
+    IS_EN.store(en, Ordering::Relaxed);
+    // 引擎错误与 CLI 文案同语种：toggling here also switches icewright-core's t! table.
+    icewright_core::i18n::set_lang(if en { "en" } else { "zh" });
 }
 
 pub fn init_from_env() {

@@ -51,6 +51,10 @@ fn next_run_id(ws_dir: &std::path::Path, date: &str) -> String {
 
 pub fn dispatch(op: &str, ws_id: &str, note: Option<&str>) -> Result<String, String> {
     let _guard = Guard::acquire()?;
+    // 引擎报错语种跟随 workspace.locale（读不到就保持默认 zh）
+    if let Ok(cfg) = open(ws_id).and_then(|ws| ws.config().map_err(e2s)) {
+        icewright_core::i18n::set_lang(&cfg.workspace.locale);
+    }
     match op {
         "init" => ws_init(ws_id),
         "preflight" => run_preflight(ws_id),

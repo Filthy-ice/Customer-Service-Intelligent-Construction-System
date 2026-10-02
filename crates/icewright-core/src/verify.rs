@@ -1,5 +1,6 @@
 //! S6 自动验证：对生成工程跑编译与单测，结论按契约写回 pipeline 状态。
 use crate::state::{self, StageFailure, StageId, StageStatus};
+use crate::t;
 use crate::workspace::Workspace;
 use anyhow::{bail, Result};
 use chrono::Utc;
@@ -81,11 +82,11 @@ fn run_cmd(program: &Path, args: &[&str], cwd: &Path) -> (bool, String) {
 pub fn verify(ws: &Workspace, out_dir: &Path, python: &Path) -> Result<Vec<Check>> {
     let state_path = ws.state_path();
     if !state_path.exists() {
-        bail!("请先 `icewright pipeline init {}`", ws.id);
+        bail!("{}", t!("need_init", &ws.id));
     }
     let mut st = state::load_state(&state_path)?;
     if st.stage(StageId::S5).map(|s| s.status) != Some(StageStatus::Approved) {
-        bail!("S5 未批准，禁止验证：先运行 `icewright generate {}`", ws.id);
+        bail!("{}", t!("verify_s5_not_approved", &ws.id));
     }
 
     let mut checks = Vec::new();

@@ -1,5 +1,6 @@
 use crate::model::ChatMessage;
 use crate::state::{self, PipelineState, StageId, StageStatus};
+use crate::t;
 use crate::workspace::Workspace;
 use anyhow::{bail, Context, Result};
 use chrono::Utc;
@@ -264,10 +265,13 @@ where
         }
     }
     bail!(
-        "连续 {} 次输出均未通过 {} 契约校验，最后错误：{}",
-        max_repairs + 1,
-        kind.contract(),
-        last_errs.join(" | ")
+        "{}",
+        t!(
+            "repair_exhausted",
+            max_repairs + 1,
+            kind.contract(),
+            last_errs.join(" | ")
+        )
     )
 }
 
@@ -315,17 +319,21 @@ pub fn load_corpus(ws_root: &Path) -> Result<String> {
         total += size;
         if total > MAX_CORPUS_BYTES {
             bail!(
-                "语料总量超过 {MAX_CORPUS_BYTES} 字节上限（{}），请拆分或先做摘要",
-                p.file_name().unwrap().to_string_lossy()
+                "{}",
+                t!(
+                    "corpus_too_large",
+                    MAX_CORPUS_BYTES,
+                    p.file_name().unwrap().to_string_lossy()
+                )
             );
         }
         let rel = p.strip_prefix(&dir).unwrap_or(&p).display();
-        let text = std::fs::read_to_string(&p)
-            .with_context(|| format!("语料文件不是有效文本或不可读: {}", p.display()))?;
+        let text =
+            std::fs::read_to_string(&p).with_context(|| t!("corpus_not_text", p.display()))?;
         out.push_str(&format!("\n\n## 文件: {rel}\n{text}"));
     }
     if out.trim().is_empty() {
-        bail!("corpus/ 为空，S1 需求摄入尚未完成");
+        bail!("{}", t!("corpus_empty"));
     }
     Ok(out)
 }
@@ -779,7 +787,7 @@ fn read_kind(ws: &Workspace, kind: Kind) -> Result<Option<Value>> {
     }
     Ok(Some(
         serde_json::from_str(&std::fs::read_to_string(&p)?)
-            .with_context(|| format!("artifacts/{} 不是合法 JSON", kind.file()))?,
+            .with_context(|| t!("artifact_not_json", kind.file()))?,
     ))
 }
 
@@ -788,7 +796,7 @@ fn read_kind(ws: &Workspace, kind: Kind) -> Result<Option<Value>> {
 pub fn record_s3(ws: &Workspace, corpus: &str, extracted: &[(Kind, Value)]) -> Result<()> {
     let path = ws.state_path();
     if !path.exists() {
-        bail!("请先 `icewright pipeline init {}`", ws.id);
+        bail!("{}", t!("need_init", &ws.id));
     }
     let mut st = state::load_state(&path)?;
     let now = Utc::now();
@@ -1111,7 +1119,7 @@ where
         );
     }
     if extracted.is_empty() {
-        bail!("--kind 未匹配任何产物类型");
+        bail!("{}", t!("kind_unmatched"));
     }
     record_s3(ws, &corpus, &extracted)?;
     crate::history::record(
@@ -1236,6 +1244,9 @@ mod tests {
 
     #[test]
     fn repair_loop_gives_up_after_budget() {
+        // 错误文案语种是全局状态，锁定并固定为 zh，避免与 i18n 切语种测试竞争
+        let _g = crate::i18n::tests::LOCK.lock().unwrap();
+        crate::i18n::set_lang("zh");
         let e = extract_artifact(Kind::Rules, "语料", "", 1, |_| {
             Ok("{}".to_string().into())
         })
