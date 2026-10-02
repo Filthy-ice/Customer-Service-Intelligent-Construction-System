@@ -40,6 +40,10 @@ aside { width: 240px; border-right: 1px solid var(--line); padding: 16px; displa
 #ws-list li { padding: 8px 10px; border-radius: 8px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #ws-list li:hover { background: #8882; }
 #ws-list li.active { background: var(--accent); color: #fff; }
+#ws-list li.hint { cursor: default; opacity: .55; font-family: inherit; }
+#ws-list li.hint:hover { background: transparent; transform: none; }
+#ws-list li.hint { cursor: default; opacity: .6; }
+#ws-list li.hint:hover { background: transparent; transform: none; }
 .hint { font-size: 12px; opacity: .65; line-height: 1.5; }
 main { flex: 1; padding: 20px 24px; overflow-y: auto; }
 .empty { opacity: .6; margin-top: 40vh; text-align: center; }

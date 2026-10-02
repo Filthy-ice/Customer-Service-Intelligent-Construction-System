@@ -59,6 +59,7 @@ var DICT = {
       ws_id_ph: "新工作区 ID",
       ws_created: "已创建工作区 {0}：选中后点「初始化」启动管线",
       ws_empty_id: "请输入工作区 ID",
+      ws_none: "暂时没有项目",
       aside_toggle: "收起 / 展开侧栏",
       tab_flow: "流程",
       tab_corpus: "需求语料",
@@ -167,6 +168,7 @@ var DICT = {
       ws_id_ph: "New workspace id",
       ws_created: "Workspace {0} created: select it and click Init to start the pipeline",
       ws_empty_id: "Enter a workspace id",
+      ws_none: "No projects yet",
       aside_toggle: "Collapse / expand sidebar",
       tab_flow: "Flow",
       tab_corpus: "Requirement corpus",
@@ -310,25 +312,44 @@ function fmtTs(ts) {
   return ts.replace("T", " ").slice(0, 19) + "Z";
 }
 
+/* ---------- 工作区列表：选择记忆（上次选中跨重启恢复）+ 启动即高亮 + 空列表提示 ---------- */
 var wsListCache = "";
+function wsMemGet() { try { return localStorage.getItem("iw_ws"); } catch (e) { return null; } }
+function wsMemSet(id) {
+  try {
+    if (id) { localStorage.setItem("iw_ws", id); } else { localStorage.removeItem("iw_ws"); }
+  } catch (e) { /* 隐私模式下忽略 */ }
+}
+
 async function loadWorkspaces() {
   var ids = await invoke("ws_list");
-  var joined = ids.join("\n");
+  // 启动优先恢复记忆的工作区；不在列表（如已删除）回退第一个。须在建 DOM 前定好，高亮才不缺位
+  if (ids.indexOf(selected) < 0) {
+    var mem = wsMemGet();
+    selected = ids.indexOf(mem) >= 0 ? mem : (ids[0] || null);
+  }
+  wsMemSet(selected);
+  var joined = ids.join("\n") + "|" + lang;
   // 列表没变就不重建 DOM：每 2s 的 tick 重绘会打断高亮/悬停样式，切换看起来发迟
   if (joined !== wsListCache) {
     wsListCache = joined;
     var ul = $("ws-list");
     ul.innerHTML = "";
+    if (!ids.length) {
+      var none = document.createElement("li");
+      none.className = "hint";
+      none.textContent = U("ws_none");
+      ul.appendChild(none);
+    }
     ids.forEach(function (id) {
       var li = document.createElement("li");
       li.textContent = id;
       li.className = id === selected ? "active" : "";
       // 高亮立刻跟上点击，不等下一次 tick 重绘
-      li.onclick = function () { selected = id; markActive("ws-list", id); refresh(); };
+      li.onclick = function () { selected = id; wsMemSet(id); markActive("ws-list", id); refresh(); };
       ul.appendChild(li);
     });
   }
-  if (ids.length && !selected) { selected = ids[0]; }
 }
 
 /* ---------- 侧栏收起 ---------- */
