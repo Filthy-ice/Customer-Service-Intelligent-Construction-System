@@ -3,7 +3,8 @@
 
 契约（与设计文档第 8 节一致，三栈同形）：
 - 入站消息带 msgid 时按 `msg:{session_id}:{msgid}` 登记幂等记录，重发不重复处理；
-- 异步任务的结果文件落盘 data/files/（默认本地实现，可整层替换：save_file/load_file 即接口），
+- 异步任务的结果文件落盘本地目录（IW_FILES_DIR 可配，默认 app/data/files；远端/共享存储
+  由客户提供 SDK 整层替换：save_file/load_file 即接口，多实例部署必须走这一模式），
   Redis 只存 `msg:{session_id}:{msgid}` → 状态+文件标识 映射（带 TTL），不落业务数据本体；
 - 取回凭 session_id+msgid 双段键，严禁裸 msgid 全局键，多会话互不串扰；
 - 配了 IW_CALLBACK_URL 则处理完成时推送一次（尽力而为，失败不影响轮取回；消费端按 msgid 幂等）。
@@ -20,7 +21,11 @@ from app.service import chat as chat_service
 from app.service import session as session_service
 
 MSG_TTL_SECONDS = 3600
-FILES_DIR = Path(__file__).resolve().parents[1] / "data" / "files"
+# 本地模式目录：IW_FILES_DIR 可配；留空=默认 app/data/files。
+# 多实例部署必须换共享/远端存储：只替换 save_file/load_file 这一层，业务代码不动。
+FILES_DIR = Path(settings.files_dir) if settings.files_dir else (
+    Path(__file__).resolve().parents[1] / "data" / "files"
+)
 CALLBACK_TIMEOUT_SECONDS = 5
 
 # 小容量固定线程池：异步任务并行的默认实现，客户有编排系统可替换本模块执行器

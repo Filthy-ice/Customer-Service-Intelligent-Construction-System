@@ -28,7 +28,8 @@ import java.util.concurrent.Executors;
  *
  * <p>契约（与设计文档第 8 节一致，三栈同形）：入站消息带 msgid 时按
  * {@code msg:{session_id}:{msgid}} 登记幂等记录，重发不重复处理；异步任务结果文件落盘
- * data/files/（默认本地实现，可整层替换：saveFile/loadFile 即接口），Redis 只存
+ * 本地目录（IW_FILES_DIR 可配，默认 data/files；远端/共享存储由客户提供 SDK 整层替换：
+ * saveFile/loadFile 即接口，多实例部署必须走这一模式），Redis 只存
  * 状态+文件标识映射（带 TTL）；取回凭 会话+msgid 双段键，严禁裸 msgid 全局键；
  * 配 IW_CALLBACK_URL 则完成时推送一次（尽力而为，失败不影响轮询取回）。</p>
  *
@@ -38,7 +39,7 @@ import java.util.concurrent.Executors;
 public class AsyncMessageService {
 
     private static final int MSG_TTL_SECONDS = 3600;
-    private static final Path FILES_DIR = Path.of("data", "files");
+    private static final Path FILES_DIR = Path.of(Settings.FILES_DIR);
     private static final Duration CALLBACK_TIMEOUT = Duration.ofSeconds(5);
 
     private final ChatService chatService;

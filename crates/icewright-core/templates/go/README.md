@@ -25,6 +25,8 @@ curl -X POST localhost:8000/chat/async -H 'content-type: application/json' \
 curl 'localhost:8000/messages/task-001/files?session_id=s1'   # 轮询状态与文件清单（msgid 须配 session_id）
 curl -OJ 'localhost:8000/messages/task-001/files/<file_id>?session_id=s1'   # 下载结果文件
 # 配 IW_CALLBACK_URL 即启用推送模式（webhook 带同一 file_id，消费端按 msgid 幂等重放安全）。
+# 结果文件存储为客户决策项：本地模式目录可配 IW_FILES_DIR（默认 data/files）；
+# 多实例部署必须换远端/共享存储——客户提供 SDK 整层替换 SaveFile/LoadFile，业务代码不动。
 # 身份与隔离：客户网关注入 X-IW-User / X-IW-Group / X-IW-Role 三头，
 # 配 IW_AUTH_SECRET 后还须带 X-IW-Sign=HMAC-SHA256(secret,"user|group|role")；
 # 会话首次使用即绑定归属，他人访问非本人会话 403（组/会话/用户/用户类型四层隔离）；

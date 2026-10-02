@@ -30,6 +30,9 @@ public final class Settings {
     /** 非实时交互回推回调（空=仅轮询 GET /messages/{msgid}/files）。 */
     public static final String CALLBACK_URL = env("IW_CALLBACK_URL", "");
 
+    /** 异步结果文件目录（本地模式）；多实例部署须换共享存储（整层替换 saveFile/loadFile）。 */
+    public static final String FILES_DIR = env("IW_FILES_DIR", "data/files");
+
     /** 身份验签共享密钥（空=调试模式免签；生产必配，配套 X-IW-* 请求头，见设计文档第 9 节）。 */
     public static final String AUTH_SECRET = env("IW_AUTH_SECRET", "");
 

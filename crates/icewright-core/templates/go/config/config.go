@@ -30,6 +30,8 @@ var (
 
 	// CallbackURL 是非实时交互回推回调（空=仅轮询 GET /messages/{msgid}/files）。
 	CallbackURL = os.Getenv("IW_CALLBACK_URL")
+	// FilesDir 是异步结果文件目录（本地模式，IW_FILES_DIR 可配）；多实例部署须换共享存储（整层替换 SaveFile/LoadFile）。
+	FilesDir = envOr("IW_FILES_DIR", "data/files")
 
 	// AuthSecret 是身份验签共享密钥（空=调试模式免签；生产必配，配套 X-IW-* 请求头，见设计文档第 9 节）。
 	AuthSecret = os.Getenv("IW_AUTH_SECRET")

@@ -2,8 +2,9 @@
 // 非实时交互：msgid 幂等合并 + 异步处理 + 文件回推。
 //
 // 契约（与设计文档第 8 节一致，三栈同形）：入站消息带 msgid 时按 msg:{session_id}:{msgid}
-// 登记幂等记录，重发不重复处理；异步任务结果文件落盘 data/files/（默认本地实现，
-// 可整层替换：SaveFile/LoadFile 即接口），Redis 只存 状态+文件标识 映射（带 TTL）；
+// 登记幂等记录，重发不重复处理；异步任务结果文件落盘本地目录（IW_FILES_DIR 可配，默认
+// data/files；远端/共享存储由客户提供 SDK 整层替换：SaveFile/LoadFile 即接口，
+// 多实例部署必须走这一模式），Redis 只存 状态+文件标识 映射（带 TTL）；
 // 取回凭 会话+msgid 双段键，严禁裸 msgid 全局键；配 IW_CALLBACK_URL 则完成时推送一次
 // （尽力而为，失败不影响轮询取回；消费端按 msgid 幂等重放安全）。
 package service
@@ -24,9 +25,8 @@ import (
 )
 
 const (
-	msgTTL       = 3600 * time.Second
-	callbackTO   = 5 * time.Second
-	filesDirName = "data/files"
+	msgTTL     = 3600 * time.Second
+	callbackTO = 5 * time.Second
 )
 
 var alnumOnly = regexp.MustCompile(`^[A-Za-z0-9]+$`)
@@ -171,17 +171,17 @@ func toStr(v any) string {
 	return s
 }
 
-// SaveFile 结果文件落盘（默认实现=本地 data/files，换共享存储只改 SaveFile/LoadFile 这一层）。
+// SaveFile 结果文件落盘（默认实现=本地目录 config.FilesDir；换共享存储只改 SaveFile/LoadFile 这一层）。
 func SaveFile(content map[string]any) (string, error) {
 	fileID := newID()
-	if err := os.MkdirAll(filesDirName, 0o755); err != nil {
+	if err := os.MkdirAll(config.FilesDir, 0o755); err != nil {
 		return "", err
 	}
 	payload, err := json.Marshal(content)
 	if err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(filepath.Join(filesDirName, fileID+".json"), payload, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(config.FilesDir, fileID+".json"), payload, 0o644); err != nil {
 		return "", err
 	}
 	return fileID, nil
@@ -192,7 +192,7 @@ func LoadFile(fileID string) (string, bool) {
 	if !alnumOnly.MatchString(fileID) {
 		return "", false
 	}
-	path := filepath.Join(filesDirName, fileID+".json")
+	path := filepath.Join(config.FilesDir, fileID+".json")
 	if _, err := os.Stat(path); err != nil {
 		return "", false
 	}
