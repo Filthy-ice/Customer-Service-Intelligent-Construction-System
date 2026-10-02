@@ -310,17 +310,24 @@ function fmtTs(ts) {
   return ts.replace("T", " ").slice(0, 19) + "Z";
 }
 
+var wsListCache = "";
 async function loadWorkspaces() {
   var ids = await invoke("ws_list");
-  var ul = $("ws-list");
-  ul.innerHTML = "";
-  ids.forEach(function (id) {
-    var li = document.createElement("li");
-    li.textContent = id;
-    li.className = id === selected ? "active" : "";
-    li.onclick = function () { selected = id; refresh(); };
-    ul.appendChild(li);
-  });
+  var joined = ids.join("\n");
+  // 列表没变就不重建 DOM：每 2s 的 tick 重绘会打断高亮/悬停样式，切换看起来发迟
+  if (joined !== wsListCache) {
+    wsListCache = joined;
+    var ul = $("ws-list");
+    ul.innerHTML = "";
+    ids.forEach(function (id) {
+      var li = document.createElement("li");
+      li.textContent = id;
+      li.className = id === selected ? "active" : "";
+      // 高亮立刻跟上点击，不等下一次 tick 重绘
+      li.onclick = function () { selected = id; markActive("ws-list", id); refresh(); };
+      ul.appendChild(li);
+    });
+  }
   if (ids.length && !selected) { selected = ids[0]; }
 }
 
