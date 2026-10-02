@@ -6,6 +6,7 @@ pub mod evaluate;
 pub mod extract;
 pub mod frameworks;
 pub mod generate;
+pub mod history;
 pub mod model;
 pub mod preflight;
 pub mod providers;

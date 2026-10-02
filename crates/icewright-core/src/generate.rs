@@ -678,6 +678,19 @@ pub fn generate(ws: &Workspace, out_dir: &Path) -> Result<GenerateReport> {
     st.updated_at = Some(now);
     state::save_state(&state_path, &st)?;
 
+    crate::history::record(
+        ws,
+        "S5",
+        &format!(
+            "生成完成 hash={} 新建 {} · 更新 {} · 未变 {} · 冲突 {}",
+            &output_hash[7..15],
+            diff.created.len(),
+            diff.modified.len(),
+            diff.unchanged.len(),
+            diff.conflicts.len()
+        ),
+    )?;
+
     Ok(GenerateReport {
         out_dir: out_dir.to_path_buf(),
         written,

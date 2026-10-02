@@ -187,6 +187,16 @@ pub fn verify(ws: &Workspace, out_dir: &Path, python: &Path) -> Result<Vec<Check
     }
     st.updated_at = Some(now);
     state::save_state(&state_path, &st)?;
+    crate::history::record(
+        ws,
+        "S6",
+        &if all_ok {
+            "验证通过：布局/编译/测试全绿".to_string()
+        } else {
+            let failed: Vec<&str> = checks.iter().filter(|c| !c.ok).map(|c| c.name).collect();
+            format!("验证失败：{}", failed.join(","))
+        },
+    )?;
     Ok(checks)
 }
 

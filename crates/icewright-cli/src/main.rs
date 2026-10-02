@@ -106,6 +106,13 @@ enum PipelineAction {
     },
     /// 打印某 workspace 的 pipeline 状态表
     Status { ws: String },
+    /// 打印生成历史（pipeline/history.jsonl，按时间顺序）
+    History {
+        ws: String,
+        /// 只显示最近 n 条
+        #[arg(long, default_value_t = 20)]
+        tail: usize,
+    },
 }
 
 #[derive(Subcommand)]
@@ -290,6 +297,7 @@ fn cmd_pipeline_init(ws_id: &str) -> Result<()> {
     };
     let st = state::PipelineState::new(ws_id, &run_id, pack);
     state::save_state(&path, &st)?;
+    icewright_core::history::record(&ws, "S1", &format!("管线初始化 run={run_id}"))?;
     println!(
         "{}",
         tf(
@@ -548,6 +556,25 @@ fn cmd_pipeline_status(ws_id: &str) -> Result<()> {
                 .unwrap_or("--------"),
             gate,
             usage
+        );
+    }
+    Ok(())
+}
+
+fn cmd_pipeline_history(ws_id: &str, tail_n: usize) -> Result<()> {
+    let ws = open_ws(ws_id)?;
+    let events = icewright_core::history::tail(&ws, tail_n)?;
+    if events.is_empty() {
+        println!("{}", t("history_none"));
+        return Ok(());
+    }
+    println!("{}", tf("history_head", &[("n", &tail_n.to_string())]));
+    for e in &events {
+        println!(
+            "  {} {:<6} {}",
+            e.ts.format("%Y-%m-%d %H:%M:%S"),
+            e.stage,
+            e.detail
         );
     }
     Ok(())
@@ -1213,6 +1240,7 @@ fn main() -> Result<()> {
             PipelineAction::Preflight { ws } => cmd_pipeline_preflight(ws),
             PipelineAction::Extract { ws, kinds } => cmd_pipeline_extract(ws, kinds),
             PipelineAction::Status { ws } => cmd_pipeline_status(ws),
+            PipelineAction::History { ws, tail } => cmd_pipeline_history(ws, *tail),
         },
         Cmd::Build { ws } => cmd_build(ws),
         Cmd::Config { action } => match action {

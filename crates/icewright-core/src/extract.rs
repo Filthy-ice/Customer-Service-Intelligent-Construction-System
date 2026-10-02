@@ -271,15 +271,43 @@ where
     )
 }
 
-/// 读取 corpus/ 全部文本文件（按名排序），带字节上限。
+/// 递归收集 corpus/ 下的语料文件（相对路径排序）。
+/// 顶层 README.md 是语料组织约定说明，本身不参与提取。
+pub fn corpus_files(ws_root: &Path) -> Result<Vec<std::path::PathBuf>> {
+    let dir = ws_root.join("corpus");
+    let mut out = Vec::new();
+    collect_files(&dir, &dir, &mut out)?;
+    out.sort_by(|a, b| {
+        a.strip_prefix(&dir)
+            .unwrap_or(a.as_path())
+            .cmp(b.strip_prefix(&dir).unwrap_or(b.as_path()))
+    });
+    Ok(out)
+}
+
+fn collect_files(dir: &Path, base: &Path, out: &mut Vec<std::path::PathBuf>) -> Result<()> {
+    if !dir.exists() {
+        return Ok(());
+    }
+    for entry in std::fs::read_dir(dir)? {
+        let p = entry?.path();
+        if p.is_dir() {
+            collect_files(&p, base, out)?;
+        } else if p.is_file()
+            && p.strip_prefix(base)
+                .map(|r| r != std::path::Path::new("README.md"))
+                .unwrap_or(true)
+        {
+            out.push(p);
+        }
+    }
+    Ok(())
+}
+
+/// 读取 corpus/ 全部文本文件（递归，含子目录分类），按相对路径排序，带字节上限。
 pub fn load_corpus(ws_root: &Path) -> Result<String> {
     let dir = ws_root.join("corpus");
-    let mut files: Vec<_> = std::fs::read_dir(&dir)?
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .filter(|p| p.is_file())
-        .collect();
-    files.sort();
+    let files = corpus_files(ws_root)?;
     let mut total = 0u64;
     let mut out = String::new();
     for p in files {
@@ -291,13 +319,10 @@ pub fn load_corpus(ws_root: &Path) -> Result<String> {
                 p.file_name().unwrap().to_string_lossy()
             );
         }
+        let rel = p.strip_prefix(&dir).unwrap_or(&p).display();
         let text = std::fs::read_to_string(&p)
             .with_context(|| format!("语料文件不是有效文本或不可读: {}", p.display()))?;
-        out.push_str(&format!(
-            "\n\n## 文件: {}\n{}",
-            p.file_name().unwrap().to_string_lossy(),
-            text
-        ));
+        out.push_str(&format!("\n\n## 文件: {rel}\n{text}"));
     }
     if out.trim().is_empty() {
         bail!("corpus/ 为空，S1 需求摄入尚未完成");
@@ -1089,6 +1114,18 @@ where
         bail!("--kind 未匹配任何产物类型");
     }
     record_s3(ws, &corpus, &extracted)?;
+    crate::history::record(
+        ws,
+        "S3",
+        &format!(
+            "提取完成：{}",
+            extracted
+                .iter()
+                .map(|(k, _)| k.slug())
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+    )?;
     // 用量入账放在落盘成功之后：失败轮次的消耗不计入完成提取的账
     if usage.calls > 0 {
         let cfg = ws.config()?;
@@ -1569,6 +1606,9 @@ mod tests {
         assert_eq!(first, st3.stage(StageId::S3).unwrap().output_hash);
         let u3 = st3.stage(StageId::S3).unwrap().usage.clone().unwrap();
         assert_eq!(u3.tokens_in, Some(1100), "单类重提取也应累计入账");
+        // 生成历史：每轮成功提取记一条 S3 事件
+        let hist = crate::history::tail(&ws, usize::MAX).unwrap();
+        assert_eq!(hist.iter().filter(|e| e.stage == "S3").count(), 3);
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -1683,6 +1723,23 @@ mod tests {
         // 失败轮次不记账
         let st = state::load_state(&ws.state_path()).unwrap();
         assert!(st.stage(StageId::S3).unwrap().usage.is_none());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn corpus_is_recursive_and_skips_readme() {
+        let base = std::env::temp_dir().join(format!("iw-corpus-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let ws = Workspace::create_at(&base, "corpus-rec").unwrap();
+        // create_at 已建分类子目录与 corpus/README.md（说明文件不参与提取）
+        std::fs::write(ws.root.join("corpus/rules/条款.md"), "规则语料").unwrap();
+        std::fs::write(ws.root.join("corpus/flows/流程.md"), "流程语料").unwrap();
+        let merged = load_corpus(&ws.root).unwrap();
+        assert!(merged.contains("## 文件: rules/条款.md"), "{merged}");
+        assert!(merged.contains("## 文件: flows/流程.md"), "{merged}");
+        assert!(!merged.contains("语料组织约定"), "README 不应进入提取语料");
+        let files = corpus_files(&ws.root).unwrap();
+        assert_eq!(files.len(), 2);
         let _ = std::fs::remove_dir_all(&base);
     }
 }

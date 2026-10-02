@@ -64,11 +64,8 @@ fn tcp_reachable(host: &str, port: u16, timeout: Duration) -> Result<(), String>
 }
 
 fn corpus_has_files(ws: &Workspace) -> Result<bool> {
-    let dir = ws.root.join("corpus");
-    if !dir.exists() {
-        return Ok(false);
-    }
-    Ok(std::fs::read_dir(&dir)?.next().is_some())
+    // 递归统计子目录分类里的文件；README.md 说明文件不计入
+    Ok(!crate::extract::corpus_files(&ws.root)?.is_empty())
 }
 
 /// S2 环境预检：全部依赖外部条件（模型端点、密钥、行业包、需求语料）必须先绿。
@@ -296,6 +293,9 @@ pub fn run_and_record(ws: &Workspace, secrets_root: &Path) -> Result<(Vec<Check>
     }
     st.updated_at = Some(now);
     state::save_state(&path, &st)?;
+    if all_ok {
+        crate::history::record(ws, "S2", &format!("预检通过 {} 项", checks.len()))?;
+    }
     Ok((checks, all_ok))
 }
 

@@ -53,6 +53,22 @@ pub fn base_dir() -> Result<PathBuf> {
     Ok(PathBuf::from(home).join(".icewright").join("workspaces"))
 }
 
+/// 语料投放约定：新建 workspace 写入 corpus/README.md，按五类产物分目录归置。
+const CORPUS_README: &str = r#"# 语料组织约定
+
+按五类产物把需求材料放入对应子目录（文件名任意，建议 Markdown/txt）：
+
+- apis/        核心系统接口文档（地址、字段、鉴权方式）
+- flows/       业务流程、状态机、话术脚本
+- dictionary/  数据字典、字段口径、枚举值表
+- rules/       行业规则、政策条款、合规红线
+- skills/      技能/意图说明（用户会说什么、期望怎么处理）
+- other/       暂不好归类的材料（与上述目录一并送入提取）
+
+提取时递归读取所有子目录文件，本 README 不参与提取。
+一份材料可同时放多个目录；总量超上限时引擎会报错并提示拆分或先做摘要。
+"#;
+
 pub struct Workspace {
     pub id: String,
     pub root: PathBuf,
@@ -71,6 +87,12 @@ impl Workspace {
         }
         for dir in [
             "corpus",
+            "corpus/apis",
+            "corpus/flows",
+            "corpus/dictionary",
+            "corpus/rules",
+            "corpus/skills",
+            "corpus/other",
             "artifacts",
             "artifacts/design",
             "artifacts/evals",
@@ -81,6 +103,7 @@ impl Workspace {
         ] {
             std::fs::create_dir_all(root.join(dir))?;
         }
+        std::fs::write(root.join("corpus/README.md"), CORPUS_README)?;
         std::fs::write(
             root.join("icewright.toml"),
             DEFAULT_CONFIG_TOML.replace("{name}", id),

@@ -363,6 +363,7 @@ pub fn publish(ws: &Workspace) -> Result<(String, bool)> {
     std::fs::create_dir_all(artifact.parent().unwrap())?;
     std::fs::write(&artifact, &md)?;
     let hash = state::sha256_hex(md.as_bytes());
+    let short_hash = hash[7..15].to_string();
     let changed = st.stage(StageId::S4).unwrap().output_hash.as_deref() != Some(hash.as_str());
     let now = Utc::now();
     if changed {
@@ -377,6 +378,7 @@ pub fn publish(ws: &Workspace) -> Result<(String, bool)> {
     }
     st.updated_at = Some(now);
     state::save_state(&path, &st)?;
+    crate::history::record(ws, "S4", &format!("设计文档渲染完成 hash={short_hash}"))?;
     Ok((artifact.display().to_string(), changed))
 }
 
@@ -424,7 +426,14 @@ pub fn decide(
         }
     }
     st.updated_at = Some(now);
-    state::save_state(&path, &st)
+    state::save_state(&path, &st)?;
+    let label = match decision {
+        GateDecision::Approved => "确认通过",
+        GateDecision::Rejected => "驳回",
+        GateDecision::PartialEdit => "部分编辑驳回",
+    };
+    crate::history::record(ws, "闸门A", &format!("设计文档{label}（决策人 {by}）"))?;
+    Ok(())
 }
 
 #[cfg(test)]
