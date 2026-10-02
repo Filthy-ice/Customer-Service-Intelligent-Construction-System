@@ -54,7 +54,7 @@ var DICT = {
       set_pick_ws: "先在左侧选择工作区",
       opened_corpus: "已在文件管理器中打开语料目录",
       opened_output: "已在文件管理器中打开生成目录",
-      export_hint: "在「生成项目」页的导出行填写客户可见目录（如 ~/桌面/客服交付），点「导出交付」",
+      delivery_hint: "在「生成项目」页填写客户规定的去向目录，点「确认交付目录」；代码将直接生成到该目录，工作区不留副本",
       ws_create: "新建",
       ws_id_ph: "新工作区 ID",
       ws_created: "已创建工作区 {0}：选中后点「初始化」启动管线",
@@ -72,13 +72,16 @@ var DICT = {
       output_files: "生成文件",
       output_edit_ph: "点左侧文件查看，可直接编辑后保存",
       output_save: "保存修改",
-      export_ph: "导出交付到客户可见目录，如 桌面/客服交付 或 D:\\交付（可含 ~）",
-      export_go: "导出交付",
-      export_ok: "已导出 {0} 个交付文件到 {1}（node_modules/target 等构建垃圾已自动排除）",
-      export_busy: "导出交付中…",
+      delivery_ph: "客户规定的交付目录（如 ~/桌面/客服交付 或 D:\\交付，可含 ~）",
+      delivery_go: "确认交付目录",
+      delivery_ok: "交付目录已确认：{0}——代码将直接生成到该目录，工作区不留副本",
+      delivery_busy: "确认交付目录中…",
+      delivery_state_ok: "已确认交付目录：{0}（S5 直接生成到此处）",
+      delivery_state_pending: "交付目录已设定：{0}（尚未确认，生成会被拒绝）",
+      delivery_state_none: "尚未设定交付目录：生成代码前须由客户规定去向",
       pick_file: "点左侧文件查看与编辑",
       no_corpus: "暂无语料：下方选分类、输文件名添加",
-      no_output: "尚未生成项目：在「流程」页推进到「生成代码」",
+      no_output: "尚未生成项目：确认交付目录后，在「流程」页点「生成代码」",
       saved: "已保存 {0}",
       corpus_added: "已创建 {0}，编辑后记得保存",
       corpus_exists: "该语料文件已存在，直接在左侧点开编辑",
@@ -94,9 +97,8 @@ var DICT = {
       err_s2_not_approved: "S2 环境预检未批准：先在「流程」页执行预检",
       err_rel: "文件路径不合法（语料须为「分类/文件名」，禁止 .. 和绝对路径）",
       err_big: "文件超过 4 MB 上限",
-      err_empty_dest: "导出目录不能为空",
-      err_need_abs: "导出目录必须是绝对路径（或 ~ 开头的家目录路径）",
-      err_dest_conflict: "导出目录不能位于工作区 output/ 之内",
+      err_empty_dest: "交付目录不能为空",
+      err_need_abs: "交付目录必须是绝对路径（或 ~ 开头的家目录路径）",
       err_empty_output: "output/ 尚无生成物可导出：先在「流程」页完成生成",
     },
   },
@@ -150,7 +152,7 @@ var DICT = {
       set_pick_ws: "Pick a workspace on the left first",
       opened_corpus: "Corpus folder opened in the file manager",
       opened_output: "Output folder opened in the file manager",
-      export_hint: "In the Generated project tab, fill a customer-visible folder (e.g. ~/Desktop/cs-delivery) in the export row and click Export delivery",
+      delivery_hint: "In the Generated project tab, type the delivery folder the customer chose and click Confirm delivery folder; code is generated straight there with no workspace copy",
       ws_create: "Create",
       ws_id_ph: "New workspace id",
       ws_created: "Workspace {0} created: select it and click Init to start the pipeline",
@@ -168,13 +170,16 @@ var DICT = {
       output_files: "Generated files",
       output_edit_ph: "Pick a file on the left to view; edit directly and save",
       output_save: "Save edits",
-      export_ph: "Export delivery to a customer-visible folder, e.g. ~/Desktop/cs-delivery or D:\\delivery",
-      export_go: "Export delivery",
-      export_ok: "Exported {0} delivery files to {1} (build junk like node_modules/target excluded)",
-      export_busy: "Exporting delivery…",
+      delivery_ph: "Delivery folder chosen by the customer (e.g. ~/Desktop/cs-delivery or D:\\delivery; ~ allowed)",
+      delivery_go: "Confirm delivery folder",
+      delivery_ok: "Delivery folder confirmed: {0} — code will be generated straight there, no workspace copy",
+      delivery_busy: "Confirming delivery folder…",
+      delivery_state_ok: "Delivery folder confirmed: {0} (S5 generates straight here)",
+      delivery_state_pending: "Delivery folder set: {0} (not confirmed yet — generation will be refused)",
+      delivery_state_none: "No delivery folder yet: the customer must choose where artifacts go before generation",
       pick_file: "Pick a file on the left to view and edit",
       no_corpus: "No corpus yet: choose a category and add a file below",
-      no_output: "Nothing generated yet: run through \"Generate code\" in the Flow tab",
+      no_output: "No generated project yet: confirm the delivery folder, then run \"Generate code\" in the Flow tab",
       saved: "Saved {0}",
       corpus_added: "Created {0}; edit it and remember to save",
       corpus_exists: "That corpus file already exists - open it from the list",
@@ -190,9 +195,8 @@ var DICT = {
       err_s2_not_approved: "S2 preflight not approved: run Preflight in the Flow tab first",
       err_rel: "Invalid file path (corpus must be \"category/file\", no .. or absolute paths)",
       err_big: "File exceeds the 4 MB limit",
-      err_empty_dest: "Export destination is required",
-      err_need_abs: "Export destination must be absolute (or start with ~ for your home directory)",
-      err_dest_conflict: "Export destination must not live inside the workspace output/ directory",
+      err_empty_dest: "Delivery folder is required",
+      err_need_abs: "Delivery folder must be absolute (or start with ~ for your home directory)",
       err_empty_output: "Nothing to export yet: finish \"Generate code\" in the Flow tab first",
     },
   },
@@ -631,6 +635,7 @@ async function loadOutput() {
   try {
     var paths = await invoke("ws_paths", { wsId: selected });
     $("output-dir").textContent = paths.output;
+    $("delivery-state").textContent = deliveryStateLine(paths);
     var files = await invoke("output_list", { wsId: selected });
     $("output-count").textContent = String(files.length);
     renderFileList("output-list", files, outRel, openOutput, U("no_output"));
@@ -677,27 +682,38 @@ function openDir(cmd, statusId) {
     .catch(function (err) { panelStatus(statusId, "✘ " + fmt(U("open_dir_fail"), [err])); });
 }
 
-/* ---------- 交付导出：把 output/ 拷到客户指定的普通目录 ---------- */
-var exporting = false;
+/* ---------- 交付目录：生成前由客户确认去向，S5 直接落盘、工作区不留副本 ---------- */
+var delivering = false;
 
-function exportDelivery() {
+function deliveryStateLine(paths) {
+  if (!paths) { return ""; }
+  var dir = String(paths.delivery_dir || "").trim();
+  if (paths.delivery_confirmed) { return "✔ " + fmt(U("delivery_state_ok"), [dir]); }
+  if (dir) { return "⚠ " + fmt(U("delivery_state_pending"), [dir]); }
+  return "⚠ " + U("delivery_state_none");
+}
+
+function confirmDelivery() {
   if (!selected) { panelStatus("output-status", "✘ " + U("set_pick_ws")); return; }
-  if (exporting) { return; }
-  var dest = $("export-dest").value.trim();
-  if (!dest) { panelStatus("output-status", "✘ " + U("err_empty_dest")); return; }
-  exporting = true;
-  $("export-go").disabled = true;
-  panelStatus("output-status", "⏳ " + U("export_busy"));
-  invoke("delivery_export", { wsId: selected, dest: dest })
-    .then(function (n) {
-      panelStatus("output-status", "✔ " + fmt(U("export_ok"), [n, dest]));
+  if (delivering) { return; }
+  var dir = $("delivery-dir").value.trim();
+  delivering = true;
+  $("delivery-go").disabled = true;
+  panelStatus("output-status", "⏳ " + U("delivery_busy"));
+  var chain = dir ? invoke("delivery_set", { wsId: selected, dir: dir }) : Promise.resolve(null);
+  chain
+    .then(function () { return invoke("delivery_confirm", { wsId: selected }); })
+    .then(function (abs) {
+      $("delivery-dir").value = "";
+      panelStatus("output-status", "✔ " + fmt(U("delivery_ok"), [abs]));
+      return loadOutput();
     })
     .catch(function (err) {
       panelStatus("output-status", "✘ " + setErr(err));
     })
     .then(function () {
-      exporting = false;
-      $("export-go").disabled = false;
+      delivering = false;
+      $("delivery-go").disabled = false;
     });
 }
 
@@ -713,9 +729,9 @@ function initViewTabs() {
   $("corpus-open").onclick = function () { openDir("open_corpus_dir", "corpus-status"); };
   $("output-save").onclick = saveOutput;
   $("output-open").onclick = function () { openDir("open_output_dir", "output-status"); };
-  $("export-go").onclick = exportDelivery;
-  $("export-dest").addEventListener("keydown", function (e) {
-    if (e.key === "Enter") { exportDelivery(); }
+  $("delivery-go").onclick = confirmDelivery;
+  $("delivery-dir").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { confirmDelivery(); }
   });
 }
 
@@ -788,7 +804,6 @@ function setErr(err) {
     file_too_large: "err_big",
     empty_dest: "err_empty_dest",
     need_abs: "err_need_abs",
-    dest_conflict: "err_dest_conflict",
   };
   var key = map[String(err)];
   return key ? U(key) : String(err);
@@ -949,10 +964,10 @@ function initMenuEvents() {
     }
     else if (a === "open_corpus") { menuOpenDir("open_corpus_dir", "opened_corpus"); }
     else if (a === "open_output") { menuOpenDir("open_output_dir", "opened_output"); }
-    else if (a === "export") {
+    else if (a === "delivery") {
       showViewTab("output");
-      menuNote("ℹ " + U("export_hint"));
-      try { $("export-dest").focus(); } catch (e) { /* 非 Tauri 环境 */ }
+      menuNote("ℹ " + U("delivery_hint"));
+      try { $("delivery-dir").focus(); } catch (e) { /* 非 Tauri 环境 */ }
     }
   }).catch(function () {});
 }

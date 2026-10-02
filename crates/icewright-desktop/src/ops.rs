@@ -4,8 +4,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use chrono::Utc;
 use icewright_core::{
-    config, delivery, design, export, extract, generate, history, model, preflight, providers,
-    secrets, state, verify, Workspace,
+    config, delivery, design, extract, generate, history, model, preflight, providers, secrets,
+    state, verify, workspace, Workspace,
 };
 
 /// 同一时刻只允许一个推进操作，防止并发改写 state.json。
@@ -94,7 +94,7 @@ pub fn ws_create(ws_id: &str) -> Result<String, String> {
     Ok(ws.root.display().to_string())
 }
 
-/* ---------- 工作区文件读写：corpus/（S3 输入）与 output/（S5 生成物）双向可编辑 ---------- */
+/* ---------- 工作区文件读写：corpus/（S3 输入）与交付目录（S5 生成物）双向可编辑 ---------- */
 
 /// 语料分类子目录，与引擎 create_at 建出的目录一致；保存只允许落进这些子目录。
 pub const CORPUS_CATS: [&str; 6] = ["rules", "apis", "flows", "dictionary", "skills", "other"];
@@ -111,6 +111,10 @@ pub struct WorkspacePaths {
     pub root: String,
     pub corpus: String,
     pub output: String,
+    /// 已设定的交付目录（空=未设定）
+    pub delivery_dir: String,
+    /// 交付目录是否已由客户确认（未确认时 S5 拒绝生成）
+    pub delivery_confirmed: bool,
 }
 
 fn seg_ok(seg: &str) -> bool {
@@ -158,12 +162,12 @@ fn walk_files(dir: &std::path::Path, skip: &str) -> Result<Vec<WsFile>, String> 
         for entry in std::fs::read_dir(&d).map_err(|e| e.to_string())? {
             let p = entry.map_err(|e| e.to_string())?.path();
             if p.is_dir() {
-                // 与交付导出同一套垃圾目录判定（node_modules/target 等不进文件树视图）
+                // 与引擎同一套构建垃圾判定（node_modules/target 等不进文件树视图）
                 let name = p
                     .file_name()
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_default();
-                if export::is_build_junk(&name) {
+                if workspace::is_build_junk(&name) {
                     continue;
                 }
                 stack.push(p);
@@ -184,10 +188,13 @@ fn walk_files(dir: &std::path::Path, skip: &str) -> Result<Vec<WsFile>, String> 
 
 pub fn ws_paths(ws_id: &str) -> Result<WorkspacePaths, String> {
     let ws = open(ws_id)?;
+    let cfg = ws.config().map_err(e2s)?;
     Ok(WorkspacePaths {
         root: ws.root.display().to_string(),
         corpus: ws.root.join("corpus").display().to_string(),
-        output: ws.root.join("output").display().to_string(),
+        output: ws.artifact_browse_dir().display().to_string(),
+        delivery_dir: cfg.workspace.delivery_dir.trim().to_string(),
+        delivery_confirmed: cfg.workspace.delivery_customer_confirmed,
     })
 }
 
@@ -199,7 +206,7 @@ pub fn corpus_list(ws_id: &str) -> Result<Vec<WsFile>, String> {
 
 pub fn output_list(ws_id: &str) -> Result<Vec<WsFile>, String> {
     let ws = open(ws_id)?;
-    let dir = ws.root.join("output");
+    let dir = ws.artifact_browse_dir();
     if !dir.exists() {
         return Ok(Vec::new());
     }
@@ -207,18 +214,16 @@ pub fn output_list(ws_id: &str) -> Result<Vec<WsFile>, String> {
     walk_files(&dir, "")
 }
 
-fn read_ws_file(ws_id: &str, sub: &str, rel: &str) -> Result<String, String> {
-    let ws = open(ws_id)?;
-    let p = ws.root.join(sub).join(rel);
+fn read_file_under(base: &std::path::Path, rel: &str) -> Result<String, String> {
+    let p = base.join(rel);
     std::fs::read_to_string(&p).map_err(|e| e.to_string())
 }
 
-fn write_ws_file(sub: &str, ws_id: &str, rel: &str, content: &str) -> Result<String, String> {
+fn write_file_under(base: &std::path::Path, rel: &str, content: &str) -> Result<String, String> {
     if content.len() > FILE_MAX_BYTES {
         return Err("file_too_large".to_string());
     }
-    let ws = open(ws_id)?;
-    let p = ws.root.join(sub).join(rel);
+    let p = base.join(rel);
     if let Some(parent) = p.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
@@ -228,42 +233,45 @@ fn write_ws_file(sub: &str, ws_id: &str, rel: &str, content: &str) -> Result<Str
 
 pub fn corpus_read(ws_id: &str, rel: &str) -> Result<String, String> {
     let rel = corpus_rel_checked(rel)?;
-    read_ws_file(ws_id, "corpus", &rel)
+    read_file_under(&open(ws_id)?.root.join("corpus"), &rel)
 }
 
 pub fn corpus_save(ws_id: &str, rel: &str, content: &str) -> Result<String, String> {
     let rel = corpus_rel_checked(rel)?;
-    write_ws_file("corpus", ws_id, &rel, content)
+    write_file_under(&open(ws_id)?.root.join("corpus"), &rel, content)
 }
 
 pub fn output_read(ws_id: &str, rel: &str) -> Result<String, String> {
     let rel = output_rel_checked(rel)?;
-    read_ws_file(ws_id, "output", &rel)
+    read_file_under(&open(ws_id)?.artifact_browse_dir(), &rel)
 }
 
+/// 直接改写交付目录里的文件；S8 重生成冲突告警逻辑不变（前端已提示）。
 pub fn output_save(ws_id: &str, rel: &str, content: &str) -> Result<String, String> {
     let rel = output_rel_checked(rel)?;
-    write_ws_file("output", ws_id, &rel, content)
+    write_file_under(&open(ws_id)?.artifact_browse_dir(), &rel, content)
 }
 
-/// 交付导出：把 output/ 整树拷到使用者/客户指定的普通目录（支持 ~ 开头），
-/// 返回落盘文件数。稳定错误码供前端双语映射。
-pub fn delivery_export(ws_id: &str, dest: &str) -> Result<u64, String> {
+/// 设定交付目录（生成前由客户规定去向；支持 ~ 开头，变更后须重新确认）。
+/// 返回展开后的绝对路径。稳定错误码供前端双语映射。
+pub fn delivery_set(ws_id: &str, dir: &str) -> Result<String, String> {
     let ws = open(ws_id)?;
-    let raw = dest.trim();
-    if raw.is_empty() {
+    if dir.trim().is_empty() {
         return Err("empty_dest".to_string());
     }
-    let d = export::expand_home(raw).map_err(|e| e.to_string())?;
+    let d = workspace::expand_home(dir.trim()).map_err(|e| e.to_string())?;
     if !d.is_absolute() {
         return Err("need_abs".to_string());
     }
-    let out = ws.root.join("output");
-    if out.starts_with(&d) || d.starts_with(&out) {
-        return Err("dest_conflict".to_string());
-    }
-    let n = export::export_delivery(&ws, raw).map_err(|e| e.to_string())?;
-    Ok(n as u64)
+    let d = ws.set_delivery_dir(dir).map_err(e2s)?;
+    Ok(d.display().to_string())
+}
+
+/// 客户确认交付目录（未确认 S5 拒绝生成）。返回生效路径。
+pub fn delivery_confirm(ws_id: &str) -> Result<String, String> {
+    let ws = open(ws_id)?;
+    let d = ws.confirm_delivery().map_err(e2s)?;
+    Ok(d.display().to_string())
 }
 
 /* ---------- 模型（AI 供应商）配置：结构化返回，文案由前端 i18n ---------- */
@@ -464,7 +472,7 @@ fn design_decide(ws_id: &str, approve: bool, note: Option<&str>) -> Result<Strin
 
 fn run_generate(ws_id: &str) -> Result<String, String> {
     let ws = open(ws_id)?;
-    let out_dir = ws.root.join("output");
+    let out_dir = ws.require_delivery_dir().map_err(e2s)?;
     let report = generate::generate(&ws, &out_dir).map_err(e2s)?;
     Ok(format!(
         "S5 生成完成：{} 个文件写入 · {} 个定制文件保留\n增量对比：新增 {} · 更新 {} · 未变 {} · 移除 {} · 冲突 {}\n输出目录：{}",
@@ -481,7 +489,7 @@ fn run_generate(ws_id: &str) -> Result<String, String> {
 
 fn run_verify(ws_id: &str) -> Result<String, String> {
     let ws = open(ws_id)?;
-    let out_dir = ws.root.join("output");
+    let out_dir = ws.require_delivery_dir().map_err(e2s)?;
     let checks = verify::verify(&ws, &out_dir, &verify::default_python()).map_err(e2s)?;
     let mut lines: Vec<String> = checks
         .iter()
@@ -697,53 +705,51 @@ mod tests {
     }
 
     #[test]
-    fn delivery_export_copies_clean_tree() {
+    fn delivery_set_confirm_gates_generation_and_browse_follows() {
         let _serial = HOME_LOCK.lock().unwrap();
-        let home = std::env::temp_dir().join(format!("iw-dsk-exp-{}", std::process::id()));
+        let home = std::env::temp_dir().join(format!("iw-dsk-deliv-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
         std::fs::create_dir_all(&home).unwrap();
         std::env::set_var("HOME", &home);
 
-        ws_create("exp-ws").unwrap();
-        assert_eq!(delivery_export("exp-ws", "").unwrap_err(), "empty_dest");
+        ws_create("del-ws").unwrap();
+        assert_eq!(delivery_set("del-ws", "").unwrap_err(), "empty_dest");
         assert_eq!(
-            delivery_export("exp-ws", "relative/dir").unwrap_err(),
+            delivery_set("del-ws", "relative/dir").unwrap_err(),
             "need_abs"
         );
-        // 尚无生成物：拒绝导出（引擎双语消息）
-        assert!(delivery_export("exp-ws", home.join("d0").to_str().unwrap()).is_err());
+        // 未设定交付目录：生成被硬闸拒绝，报错自带 set 指引
+        let err = dispatch("generate", "del-ws", None).unwrap_err();
+        assert!(err.contains("delivery set"), "{err}");
 
-        output_save("exp-ws", "app/main.py", "print(1)").unwrap();
-        output_save("exp-ws", "app/util/io.py", "x").unwrap();
-        // S6 构建垃圾：文件树视图与导出都要排除
-        let junk = ws_paths("exp-ws").unwrap().output;
-        std::fs::create_dir_all(format!("{junk}/node_modules/dep")).unwrap();
-        std::fs::write(format!("{junk}/node_modules/dep/index.js"), "junk").unwrap();
-        assert!(output_list("exp-ws")
-            .unwrap()
-            .iter()
-            .all(|f| !f.rel.contains("node_modules")));
+        let dir = delivery_set("del-ws", "~/客服交付").unwrap();
+        assert_eq!(dir, home.join("客服交付").display().to_string());
+        let paths = ws_paths("del-ws").unwrap();
+        assert_eq!(paths.delivery_dir, dir);
+        assert!(!paths.delivery_confirmed);
+        assert_eq!(paths.output, dir, "浏览面板应跟随已设定的交付目录");
+        // 已设定未确认：仍拒绝，报错自带 confirm 指引
+        let err = dispatch("generate", "del-ws", None).unwrap_err();
+        assert!(err.contains("delivery confirm"), "{err}");
 
-        let dest = home.join("deliver");
-        assert_eq!(
-            delivery_export("exp-ws", dest.to_str().unwrap()).unwrap(),
-            2
-        );
-        assert_eq!(
-            std::fs::read_to_string(dest.join("app/main.py")).unwrap(),
-            "print(1)"
-        );
-        assert!(!dest.join("node_modules").exists());
+        assert_eq!(delivery_confirm("del-ws").unwrap(), dir);
+        assert!(ws_paths("del-ws").unwrap().delivery_confirmed);
 
-        // 导出目标位于 output/ 内会自拷贝：拒绝
-        let inside = format!("{junk}/sub");
-        assert_eq!(
-            delivery_export("exp-ws", &inside).unwrap_err(),
-            "dest_conflict"
-        );
-        // ~ 展开为客户机主目录（非开发者也能写 ~/交付）
-        assert_eq!(delivery_export("exp-ws", "~/deliver2").unwrap(), 2);
-        assert!(home.join("deliver2/app/main.py").is_file());
+        // 文件直接写进交付目录；构建垃圾不进视图；工作区不留副本
+        output_save("del-ws", "app/main.py", "print(1)").unwrap();
+        std::fs::create_dir_all(format!("{dir}/node_modules/dep")).unwrap();
+        std::fs::write(format!("{dir}/node_modules/dep/i.js"), "junk").unwrap();
+        let list = output_list("del-ws").unwrap();
+        assert!(list.iter().any(|f| f.rel == "app/main.py"), "{list:?}");
+        assert!(list.iter().all(|f| !f.rel.contains("node_modules")));
+        assert!(home.join("客服交付/app/main.py").is_file());
+        assert!(!home
+            .join(".icewright/workspaces/del-ws/output/app/main.py")
+            .exists());
+
+        // 改目录自动作废确认
+        delivery_set("del-ws", "~/deliver2").unwrap();
+        assert!(!ws_paths("del-ws").unwrap().delivery_confirmed);
         let _ = std::fs::remove_dir_all(&home);
     }
 

@@ -43,18 +43,11 @@ enum Cmd {
         #[command(subcommand)]
         action: DesignAction,
     },
-    /// S5 代码生成（要求闸门A 对当前设计产物有效）
-    Generate {
-        ws: String,
-        /// 输出目录，缺省为 workspace 的 output/
-        #[arg(long)]
-        out: Option<String>,
-    },
+    /// S5 代码生成（要求闸门A 对当前设计产物有效；直接生成到客户确认的交付目录）
+    Generate { ws: String },
     /// S6 自动验证：对生成工程跑编译与单测，结论写回状态
     Verify {
         ws: String,
-        #[arg(long)]
-        out: Option<String>,
         /// 目标栈解释器（缺省 $IW_PYTHON 或 python3）
         #[arg(long)]
         python: Option<String>,
@@ -85,7 +78,7 @@ enum Cmd {
 
 #[derive(Subcommand)]
 enum WsAction {
-    /// 创建 workspace（corpus/artifacts/pipeline/output/eval-runs/logs 目录布局）
+    /// 创建 workspace（corpus/artifacts/pipeline/eval-runs/logs 目录布局）
     New { id: String },
     /// 列出全部 workspace
     List,
@@ -196,12 +189,14 @@ enum DeliveryAction {
         #[arg(long)]
         role: Option<String>,
     },
-    /// 导出交付物到指定目录（客户可见位置，如桌面）；排除构建垃圾
-    Export {
+    /// 设定交付目录（生成前由客户规定去向，绝对路径或 ~/ 开头；改目录后须重新确认）
+    Set {
         ws: String,
         #[arg(long)]
-        to: String,
+        dir: String,
     },
+    /// 客户确认交付目录（未确认 S5 拒绝生成——产物直接落该目录，工作区不留副本）
+    Confirm { ws: String },
 }
 
 #[derive(Subcommand)]
@@ -668,8 +663,8 @@ fn cmd_build(ws_id: &str) -> Result<()> {
         }
     }
 
-    // S5 代码生成
-    let out_dir = ws.root.join("output");
+    // S5 代码生成：落盘到客户确认的交付目录（未设定/未确认直接拒绝，工作区不留副本）
+    let out_dir = ws.require_delivery_dir()?;
     if stage_approved(&st, state::StageId::S5) {
         println!("{}", tf("build_already", &[("stage", "S5")]));
     } else {
@@ -1062,24 +1057,18 @@ fn print_gen_report(report: &icewright_core::generate::GenerateReport) {
     }
 }
 
-fn cmd_generate(ws_id: &str, out: Option<&str>) -> Result<()> {
+fn cmd_generate(ws_id: &str) -> Result<()> {
     let ws = open_ws(ws_id)?;
-    let out_dir = match out {
-        Some(p) => std::path::PathBuf::from(p),
-        None => ws.root.join("output"),
-    };
+    let out_dir = ws.require_delivery_dir()?;
     let report = icewright_core::generate::generate(&ws, &out_dir)?;
     print_gen_report(&report);
     println!("{}", t("gen_next"));
     Ok(())
 }
 
-fn cmd_verify(ws_id: &str, out: Option<&str>, python: Option<&str>) -> Result<()> {
+fn cmd_verify(ws_id: &str, python: Option<&str>) -> Result<()> {
     let ws = open_ws(ws_id)?;
-    let out_dir = match out {
-        Some(p) => std::path::PathBuf::from(p),
-        None => ws.root.join("output"),
-    };
+    let out_dir = ws.require_delivery_dir()?;
     let py = python
         .map(std::path::PathBuf::from)
         .unwrap_or_else(icewright_core::verify::default_python);
@@ -1145,15 +1134,26 @@ fn cmd_delivery(action: &DeliveryAction) -> Result<()> {
             println!("{}", tf("gate_b_rejected", &[("note", note)]));
             println!("{}", tf("delivery_fix", &[("ws", &ws.id)]));
         }
-        DeliveryAction::Export { ws, to } => {
+        DeliveryAction::Set { ws, dir } => {
             let ws = open_ws(ws)?;
-            let n = icewright_core::export::export_delivery(&ws, to)?;
-            let dest = icewright_core::export::expand_home(to)?;
-            let n_s = n.to_string();
-            let path_s = dest.display().to_string();
+            let dest = ws.set_delivery_dir(dir)?;
             println!(
                 "{}",
-                tf("delivery_exported", &[("n", &n_s), ("path", &path_s)])
+                tf(
+                    "delivery_set",
+                    &[("dir", &dest.display().to_string()), ("ws", &ws.id)]
+                )
+            );
+        }
+        DeliveryAction::Confirm { ws } => {
+            let ws = open_ws(ws)?;
+            let dest = ws.confirm_delivery()?;
+            println!(
+                "{}",
+                tf(
+                    "delivery_confirmed",
+                    &[("dir", &dest.display().to_string()), ("ws", &ws.id)]
+                )
             );
         }
     }
@@ -1272,8 +1272,8 @@ fn main() -> Result<()> {
             }
         },
         Cmd::Design { action } => cmd_design(action),
-        Cmd::Generate { ws, out } => cmd_generate(ws, out.as_deref()),
-        Cmd::Verify { ws, out, python } => cmd_verify(ws, out.as_deref(), python.as_deref()),
+        Cmd::Generate { ws } => cmd_generate(ws),
+        Cmd::Verify { ws, python } => cmd_verify(ws, python.as_deref()),
         Cmd::Delivery { action } => cmd_delivery(action),
         Cmd::Evaluate { ws, url } => cmd_evaluate(ws, url),
         Cmd::Model { action } => match action {

@@ -17,7 +17,7 @@
 - **生成历史与语料分类**：每次有状态推进（预检、提取、渲染、生成、验证、交付、两道闸门决策）自动追加到 workspace 的 `pipeline/history.jsonl`，`icewright pipeline history` 按时间回看全程；需求语料按 `corpus/{apis|flows|dictionary|rules|skills|other}/` 分类子目录投放，提取时递归读取。
 - **自带模型接入（BYOK）**：任何 OpenAI-compatible 端点均可；供应商目录 + 在线模型发现，接入点与模型名不写死。
 - **双语界面**：构建器 CLI 文案 zh/en 可选（`workspace.locale` 或 `ICERIGHT_LOCALE`）。
-- **桌面客户端**：`icewright-desktop`（Tauri 2）实时查看各 workspace 的 S1–S8 进度、闸门状态与生成历史，并可在窗口内直接推进：初始化、预检、渲染设计、两道闸门决策、生成、验证、交付——与 CLI 走同一状态机路径，决策人记为 `desktop`；S3 提取需模型会话交互，仍走 CLI。危险操作（批准闸门）需二次点击确认。界面文案与引擎报错均中英双语：默认跟随该 workspace 的 `locale`，也可在窗口内直接点「中文 / EN」切换（手动选择优先并跨重启记忆）。原生菜单栏（文件/视图/窗口/帮助）提供刷新、重新加载、语种切换与「关于」对话框，快捷键 F5 / Ctrl(Cmd)+R / Ctrl(Cmd)+Q；窗口带启动淡入动画，版本信息收入「关于」而非挂在明面上；界面深浅色自动跟随系统主题，窗口图标内嵌于二进制（Linux 终端直跑也不再是默认齿轮）。模型供应商配置也有窗口内入口：菜单「文件 → 模型设置…」（macOS 在应用菜单，快捷键 `Ctrl/Cmd+,`）或侧栏按钮，可选供应商、在线发现可用模型、写入接入点/模型名/密钥引用（只存 `env://`/`keyring://` 引用，不存密钥本体）。
+- **桌面客户端**：`icewright-desktop`（Tauri 2）实时查看各 workspace 的 S1–S8 进度、闸门状态与生成历史，并可在窗口内直接推进：初始化、预检、渲染设计、两道闸门决策、生成、验证、交付——与 CLI 走同一状态机路径，决策人记为 `desktop`；S3 提取需模型会话交互，仍走 CLI。危险操作（批准闸门）需二次点击确认。界面文案与引擎报错均中英双语：默认跟随该 workspace 的 `locale`，手动语言/主题偏好跨重启记忆。信息架构：左侧栏只放工作区列表（新建/收起），其余功能入口全部收进原生菜单栏——「文件」（刷新 F5 / 重新加载 Ctrl(Cmd)+R / 打开语料目录 / 打开生成目录 / 交付目录… / 退出）、「设置」（模型设置 `Ctrl/Cmd+,` / 界面语言 / 主题，当前生效项带勾选）、「窗口」「帮助」（关于 / GitHub）。窗口带启动淡入动画，界面深浅色可跟随系统或手动锁定；Linux 下启动时自动注册任务栏图标（不再显示默认齿轮）。模型供应商配置在「设置 → 模型设置…」：可选供应商、在线发现可用模型、写入接入点/模型名/密钥引用（只存 `env://`/`keyring://` 引用，不存密钥本体）。「生成项目」页的交付目录行用于生成前确认去向：S5 直接把工程生成到客户指定目录（可含 `~`），工作区只保留语料、产物、状态与日志等可复用内容，不留生成物副本；目录可继续点开查看与编辑，S8 重生成对定制文件的保护规则不变。
 
 ## 安装
 
@@ -55,8 +55,10 @@ icewright pipeline preflight my-claim              # S2 预检
 icewright pipeline extract my-claim                # S3 五类产物提取（校验-修复回环，可 --kinds 增补单类）
 icewright design render my-claim                   # S4 设计文档
 icewright design approve my-claim --by 张三         # 闸门A
-icewright generate my-claim --out ./generated      # S5 生成目标工程
-icewright verify my-claim --out ./generated        # S6 编译+单测
+icewright delivery set my-claim --dir ~/桌面/客服交付 # 生成前由客户规定交付目录（绝对路径或 ~ 开头）
+icewright delivery confirm my-claim                # 客户确认去向（硬闸：未确认 S5 拒绝生成）
+icewright generate my-claim                        # S5 直接生成到已确认的交付目录（工作区不留副本）
+icewright verify my-claim                          # S6 编译+单测（同一交付目录）
 icewright evaluate my-claim --url http://127.0.0.1:8000  # 评测回放（红线用例把关）
 icewright delivery render my-claim                 # S7 交付报告
 icewright delivery approve my-claim --by 张三       # 闸门B

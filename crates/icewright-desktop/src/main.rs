@@ -60,7 +60,7 @@ const TEXTS_ZH: MenuText = MenuText {
     settings: "模型设置…",
     open_corpus: "打开语料目录",
     open_output: "打开生成目录",
-    export: "导出交付到…",
+    export: "交付目录…",
     quit: "退出",
     settings_menu: "设置",
     lang: "界面语言",
@@ -87,7 +87,7 @@ const TEXTS_EN: MenuText = MenuText {
     settings: "Model Settings…",
     open_corpus: "Open Corpus Folder",
     open_output: "Open Output Folder",
-    export: "Export Delivery To…",
+    export: "Delivery Folder…",
     quit: "Quit",
     settings_menu: "Settings",
     lang: "UI Language",
@@ -164,7 +164,7 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         .separator()
         .item(&item(app, "open_corpus", t.open_corpus, None)?)
         .item(&item(app, "open_output", t.open_output, None)?)
-        .item(&item(app, "export", t.export, None)?)
+        .item(&item(app, "delivery", t.export, None)?)
         .build()?;
     #[cfg(not(target_os = "macos"))]
     let file = SubmenuBuilder::new(app, t.file)
@@ -173,7 +173,7 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         .separator()
         .item(&item(app, "open_corpus", t.open_corpus, None)?)
         .item(&item(app, "open_output", t.open_output, None)?)
-        .item(&item(app, "export", t.export, None)?)
+        .item(&item(app, "delivery", t.export, None)?)
         .separator()
         .item(&item(app, "quit", t.quit, Some("CmdOrCtrl+Q"))?)
         .build()?;
@@ -332,12 +332,20 @@ fn open_corpus_dir(ws_id: String) -> Result<(), String> {
     open_url(&paths.corpus)
 }
 
-/// 交付导出：把 output/ 整树拷到客户指定目录，返回文件数（大目录拷贝放阻塞线程池）。
+/// 交付目录设定：生成前由客户规定去向（支持 ~），改目录会作废确认。返回展开后绝对路径。
 #[tauri::command]
-async fn delivery_export(ws_id: String, dest: String) -> Result<u64, String> {
-    tauri::async_runtime::spawn_blocking(move || ops::delivery_export(&ws_id, &dest))
+async fn delivery_set(ws_id: String, dir: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || ops::delivery_set(&ws_id, &dir))
         .await
-        .map_err(|e| format!("导出任务崩溃: {e}"))?
+        .map_err(|e| format!("交付目录任务崩溃: {e}"))?
+}
+
+/// 客户确认交付目录（未确认 S5 拒绝生成）。返回生效路径。
+#[tauri::command]
+async fn delivery_confirm(ws_id: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || ops::delivery_confirm(&ws_id))
+        .await
+        .map_err(|e| format!("交付目录任务崩溃: {e}"))?
 }
 
 #[tauri::command]
@@ -529,7 +537,8 @@ fn handle_menu_action(app: &tauri::AppHandle, id: &str) {
             let _ = apply_menu(app);
             let _ = app.emit("menu-action", format!("theme:{}", &id[6..]));
         }
-        "refresh" | "reload" | "about" | "settings" | "open_corpus" | "open_output" | "export" => {
+        "refresh" | "reload" | "about" | "settings" | "open_corpus" | "open_output"
+        | "delivery" => {
             let _ = app.emit("menu-action", id);
         }
         "win_min" | "win_max" | "win_close" => {
@@ -570,7 +579,8 @@ fn main() {
             output_save,
             open_output_dir,
             open_corpus_dir,
-            delivery_export,
+            delivery_set,
+            delivery_confirm,
             history_tail,
             app_version,
             ws_locale,

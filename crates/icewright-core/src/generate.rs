@@ -434,6 +434,8 @@ pub fn generate(ws: &Workspace, out_dir: &Path) -> Result<GenerateReport> {
     if !state_path.exists() {
         bail!("{}", t!("need_init", &ws.id));
     }
+    // 交付目录可能是客户口头指定的未建路径：落盘前先建好
+    std::fs::create_dir_all(out_dir)?;
     let mut st = state::load_state(&state_path)?;
     if !st.gate_is_current(StageId::S4) {
         bail!("{}", t!("gate_a_not_active"));

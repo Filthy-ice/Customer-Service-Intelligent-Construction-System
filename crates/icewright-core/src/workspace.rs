@@ -11,6 +11,10 @@ stack = "python"   # python | java | go（三栈线格式一致，S6 按栈分�
 locale = "zh"      # CLI 文案语言：zh | en（临时覆盖用环境变量 ICERIGHT_LOCALE）
 #agent_framework = ""  # 覆盖生成物 agent 框架默认选型（留空用每栈默认；见设计文档候选表）
 framework_customer_confirmed = false  # Agent 基础框架选型须客户技术侧确认后方可进 S5（硬闸）
+# 交付目录：生成物直接落盘的客户可见位置（如 ~/Desktop/客服交付 或 D:\\交付）。
+# S5 前必须设定并经客户确认（硬闸）；工作区不留生成物副本，改目录后须重新确认。
+delivery_dir = ""
+delivery_customer_confirmed = false
 #business_console = false  # 生成物附带业务人员后台页 /console（调试页与开发后台始终必含）
 
 [model]
@@ -99,7 +103,6 @@ impl Workspace {
             "artifacts/design",
             "artifacts/evals",
             "pipeline",
-            "output",
             "eval-runs",
             "logs",
         ] {
@@ -177,10 +180,174 @@ impl Workspace {
         }
         Ok(cfg)
     }
+
+    /// S5/S6 的落盘目录：客户已确认的交付目录。未设定或未确认都硬闸拒绝——
+    /// 交付去向必须生成前谈定，工作区不保留生成物副本。
+    pub fn require_delivery_dir(&self) -> Result<PathBuf> {
+        let cfg = self.config()?;
+        let raw = cfg.workspace.delivery_dir.trim();
+        if raw.is_empty() {
+            bail!(
+                "{}",
+                t!(
+                    "delivery_unconfigured",
+                    format!("`icewright delivery set {} --dir <路径>`", self.id)
+                )
+            );
+        }
+        if !cfg.workspace.delivery_customer_confirmed {
+            bail!(
+                "{}",
+                t!(
+                    "delivery_unconfirmed",
+                    format!("`icewright delivery confirm {}`", self.id)
+                )
+            );
+        }
+        let dir = expand_home(raw)?;
+        if !dir.is_absolute() {
+            bail!("{}", t!("delivery_not_abs", raw));
+        }
+        Ok(dir)
+    }
+
+    /// 设定/变更交付目录；变更即作废既有确认（须重新 confirm）。返回展开后的绝对路径。
+    pub fn set_delivery_dir(&self, raw: &str) -> Result<PathBuf> {
+        let raw = raw.trim();
+        if raw.is_empty() {
+            bail!("{}", t!("delivery_empty"));
+        }
+        let dir = expand_home(raw)?;
+        if !dir.is_absolute() {
+            bail!("{}", t!("delivery_not_abs", raw));
+        }
+        let p = self.root.join("icewright.toml");
+        config::set_and_save(&p, "workspace.delivery_dir", &dir.display().to_string())?;
+        config::set_and_save(&p, "workspace.delivery_customer_confirmed", "false")?;
+        Ok(dir)
+    }
+
+    /// 客户确认当前交付目录（须已设定）。返回生效的绝对路径。
+    pub fn confirm_delivery(&self) -> Result<PathBuf> {
+        let cfg = self.config()?;
+        if cfg.workspace.delivery_dir.trim().is_empty() {
+            bail!(
+                "{}",
+                t!(
+                    "delivery_unconfigured",
+                    format!("`icewright delivery set {} --dir <路径>`", self.id)
+                )
+            );
+        }
+        let dir = expand_home(&cfg.workspace.delivery_dir)?;
+        if !dir.is_absolute() {
+            bail!(
+                "{}",
+                t!("delivery_not_abs", cfg.workspace.delivery_dir.trim())
+            );
+        }
+        config::set_and_save(
+            &self.root.join("icewright.toml"),
+            "workspace.delivery_customer_confirmed",
+            "true",
+        )?;
+        Ok(dir)
+    }
+
+    /// 查看/编辑面板的生成物目录：已设定交付目录则指向它，否则回退旧约定 workspace 下 output/
+    /// （仅为兼容历史工作区里已存在的生成物；新工作区不再有该目录）。
+    pub fn artifact_browse_dir(&self) -> PathBuf {
+        let cfg = self.config().ok();
+        match cfg
+            .map(|c| c.workspace.delivery_dir)
+            .filter(|d| !d.trim().is_empty())
+        {
+            Some(raw) => expand_home(&raw).unwrap_or_else(|_| self.root.join("output")),
+            None => self.root.join("output"),
+        }
+    }
+}
+
+/// S6 验证会留下构建垃圾（node_modules/target/__pycache__ 等），交付查看都不该带上。
+pub const SKIP_DIRS: [&str; 6] = [
+    "node_modules",
+    "target",
+    "__pycache__",
+    ".venv",
+    "dist",
+    ".git",
+];
+
+/// 目录名是否属于构建垃圾（引擎与桌面端文件视图共用，行为一致）。
+pub fn is_build_junk(name: &str) -> bool {
+    SKIP_DIRS.contains(&name)
+}
+
+/// 展开 `~` / `~/x` 到用户主目录；Windows 用 USERPROFILE。
+pub fn expand_home(raw: &str) -> Result<PathBuf> {
+    let t = raw.trim();
+    if t == "~" || t.starts_with("~/") || t.starts_with("~\\") {
+        let home = std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .context(t!("no_home"))?;
+        let rest = t.trim_start_matches('~').trim_start_matches(['/', '\\']);
+        let base = PathBuf::from(home);
+        return Ok(if rest.is_empty() {
+            base
+        } else {
+            base.join(rest)
+        });
+    }
+    Ok(PathBuf::from(t))
 }
 
 impl AsRef<Path> for Workspace {
     fn as_ref(&self) -> &Path {
         &self.root
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn delivery_gate_requires_set_then_confirm() {
+        let base = std::env::temp_dir().join(format!("iw-deliv-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let ws = Workspace::create_at(&base, "deliv-ws").unwrap();
+        // 未设定：拒绝生成
+        let err = ws.require_delivery_dir().unwrap_err().to_string();
+        assert!(err.contains("delivery set"), "{err}");
+        // 相对路径拒绝
+        assert!(ws.set_delivery_dir("relative/dir").is_err());
+        assert!(ws.set_delivery_dir("  ").is_err());
+        let dir = ws.set_delivery_dir("/srv/customer-delivery").unwrap();
+        assert_eq!(dir, PathBuf::from("/srv/customer-delivery"));
+        // 已设定未确认：仍拒绝
+        let err = ws.require_delivery_dir().unwrap_err().to_string();
+        assert!(err.contains("delivery confirm"), "{err}");
+        let got = ws.confirm_delivery().unwrap();
+        assert_eq!(got, PathBuf::from("/srv/customer-delivery"));
+        assert_eq!(ws.require_delivery_dir().unwrap(), got);
+        assert_eq!(ws.artifact_browse_dir(), got);
+        // 换目录自动作废确认
+        ws.set_delivery_dir("/srv/other").unwrap();
+        assert!(ws.require_delivery_dir().is_err());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn expand_home_handles_tilde() {
+        let home = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .expect("home env");
+        let base = PathBuf::from(&home);
+        assert_eq!(expand_home("~").unwrap(), base);
+        assert_eq!(
+            expand_home("~/Desktop/out").unwrap(),
+            base.join("Desktop/out")
+        );
+        assert_eq!(expand_home("/abs/p").unwrap(), PathBuf::from("/abs/p"));
     }
 }
