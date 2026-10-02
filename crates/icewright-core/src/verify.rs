@@ -236,7 +236,11 @@ mod tests {
         let cfg_path = ws.root.join("icewright.toml");
         let raw = std::fs::read_to_string(&cfg_path)
             .unwrap()
-            .replace("pack = \"\"", "pack = \"insurance/auto-claim@0.1.0\"");
+            .replace("pack = \"\"", "pack = \"insurance/auto-claim@0.1.0\"")
+            .replace(
+                "framework_customer_confirmed = false",
+                "framework_customer_confirmed = true",
+            );
         std::fs::write(&cfg_path, raw).unwrap();
         let rules = icewright_artifact::example("rules").unwrap();
         std::fs::write(

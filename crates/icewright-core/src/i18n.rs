@@ -13,6 +13,7 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ("verify_s5_not_approved", "S5 未批准，禁止验证：先运行 `icewright generate {0}`", "S5 not approved, verification blocked: run `icewright generate {0}` first"),
     ("tpl_undefined_slot", "模板 {0} 含未定义槽位: {1}", "template {0} contains undefined slots: {1}"),
     ("gate_a_not_active", "闸门A未生效：请先 `icewright design render` 并由 `icewright design approve` 确认；任何产物变更后需重新确认", "Gate A not in force: run `icewright design render` then `icewright design approve`; any artifact change requires re-approval"),
+    ("framework_not_customer_confirmed", "Agent 基础框架选型尚未获客户技术侧确认（其余中间件无需核对）：取得对方确认后 `icewright config set <ws> workspace.framework_customer_confirmed true` 再生成", "Agent base framework selection not yet confirmed by the customer's technical side (other middleware needs no item-by-item check): obtain their confirmation, then `icewright config set <ws> workspace.framework_customer_confirmed true` before generating"),
     ("missing_rules_artifact", "缺少 artifacts/rules.json，请先完成 S3 规则提取", "artifacts/rules.json missing, finish S3 rule extraction first"),
     ("rules_contract_violation", "rules.json 违反契约，拒绝生成：{0}", "rules.json violates its contract, refusing to generate: {0}"),
     ("skills_contract_violation", "skills.json 违反契约，拒绝生成：{0}", "skills.json violates its contract, refusing to generate: {0}"),

@@ -276,9 +276,20 @@ pub fn render_design(ws: &Workspace) -> Result<String> {
         out.push_str("- （尚未提供 apis.json，请在闸门A 前确认对方核心系统接口）\n");
     }
 
-    out.push_str("\n## 8. 闸门A 确认须知\n\n");
+    out.push_str("\n## 8. 外部依赖与交互契约（进出双向）\n\n");
+    out.push_str("- 集成前提：生成的系统交付后**必然**被客户侧其他系统调用（进），同时调用客户核心系统（出）；集成面为 HTTP + 环境变量注入配置，两端都要留好接口。\n");
+    out.push_str("- **依赖替换策略**：需求若排除某类设施（如不能使用 MySQL 等关系库、只能走文件），由客户提供对应依赖与工具类；客户未提供时，引擎默认生成一套实现并置于稳定接口之后（各栈 integration/ 层即\"端口+适配器\"形态，如 `IW_CORE_MODE=mock|mysql` 切换），客户后续以任何方式自接实现都不改动业务代码。\n");
+    out.push_str("- **非实时交互契约**（异步任务的信息合并与文件回推）：\n");
+    out.push_str("  1. 幂等与合并：入站消息携带 msgid；同会话内按 msgid 去重（重发不重复处理）、按到达序把多条消息合并为单一上下文，槽位增量合并。\n");
+    out.push_str("  2. 文件回推：异步任务生成的文件不随响应同步返回；写入共享存储后，在**同一个 Redis** 登记命名空间键 `iw:{系统名}:files:{session_id}:{msgid}` → file_id 列表（带 TTL）。\n");
+    out.push_str("  3. 取回隔离：客户系统凭 session_id+msgid 从同一 Redis 取文件标识/链接；键必须带会话+msgid 双前缀、file_id 由服务端生成，严禁裸 msgid 全局键，防止多会话取混乱。\n");
+    out.push_str("  4. 取回模式：默认轮询 `GET /messages/{msgid}/files`；客户可提供回调 URL，启用推送模式（webhook 携带同一 file_id，幂等重放安全）。\n");
+    out.push_str("  5. 落地状态：⏳ 本节为交互契约锚点；当前三栈模板的 `/chat` 为同步接口，异步端点须待模板集成后交付，闸门A 时如实标注、不谎称已实现。\n");
+
+    out.push_str("\n## 9. 闸门A 确认须知\n\n");
     out.push_str("- 本文件由引擎确定性渲染；任何产物变更后须重新 `design render` 并再次确认。\n");
     out.push_str("- 技术栈与\"生成物 Agent 框架选型\"小节代表交付承诺：确认即锁定，S5 按此构建，改动请驳回后重渲染。\n");
+    out.push_str("- Agent 基础框架选型须**客户技术侧**确认（见选型小节确认状态）；其余中间件无需逐项核对。\n");
     out.push_str("- 确认后进入 S5 代码生成；驳回请附注原因。\n");
     Ok(out)
 }
@@ -319,6 +330,14 @@ fn framework_section(cfg: &Config) -> Result<String> {
         crate::frameworks::Integration::Planned => {
             "- 集成状态：⏳ 模板集成实施中；本选型随闸门A 一并确认，S5 未达该状态绝不谎称交付\n"
         }
+    });
+    out.push_str(
+        "- 分层定位：项目基础框架（Spring Boot/FastAPI/net/http）与模型接入层（OpenAI-compatible；java 由 Spring AI 承担）不属于本小节确认对象；本小节只确认**客服 Agent 基础框架**——三者可并存，如 Java 项目常见 Boot（项目基础）+ Spring AI（模型基础）+ AgentScope（Agent 基础）组合。其余中间件（Redis/DB/页面框架）不需要与客户逐项核对\n",
+    );
+    out.push_str(if cfg.workspace.framework_customer_confirmed {
+        "- 客户确认状态：✅ 已获客户技术侧确认，S5 放行\n"
+    } else {
+        "- 客户确认状态：⏳ 待客户技术侧确认——确认后 `icewright config set <ws> workspace.framework_customer_confirmed true` 方可进 S5；未确认将被硬闸拒绝\n"
     });
     out.push_str("- 覆盖方式：`icewright config set <ws> workspace.agent_framework <候选名>`\n\n");
     out.push_str("| 候选 | 版本线 | Star | 优势 | 劣势 |\n|---|---|---|---|---|\n");
@@ -602,6 +621,17 @@ mod tests {
         let md = render_design(&ws).unwrap();
         assert!(md.contains("### 生成物 Agent 框架选型"));
         assert!(md.contains("agentscope"));
+        assert!(
+            md.contains("客服 Agent 基础框架"),
+            "选型范围须按项目基础/模型接入/Agent 基础分层表述"
+        );
+        assert!(md.contains("客户确认状态：⏳"), "选型默认待客户技术侧确认");
+        assert!(
+            md.contains("## 8. 外部依赖与交互契约"),
+            "依赖替换与非实时交互契约应进设计文档"
+        );
+        assert!(md.contains("幂等与合并"));
+        assert!(md.contains("## 9. 闸门A 确认须知"));
         assert!(md.contains("★"));
         assert!(md.contains("S5 模板已按该框架构建生成物"));
 

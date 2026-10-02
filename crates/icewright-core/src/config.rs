@@ -21,6 +21,8 @@ pub struct WorkspaceCfg {
     pub locale: String,
     /// 生成物 Agent 框架覆盖（空=用每栈默认；值须命中该栈候选，见 frameworks::resolve）
     pub agent_framework: String,
+    /// Agent 基础框架选型是否已获客户技术侧确认（false 时 S5 拒绝生成；其余中间件无需核对）
+    pub framework_customer_confirmed: bool,
     /// 是否在生成物中附带业务人员后台页 /console（默认关闭；调试页与开发后台始终必含）
     pub business_console: bool,
 }
@@ -33,6 +35,7 @@ impl Default for WorkspaceCfg {
             stack: String::new(),
             locale: "zh".to_string(),
             agent_framework: String::new(),
+            framework_customer_confirmed: false,
             business_console: false,
         }
     }

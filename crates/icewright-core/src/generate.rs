@@ -486,6 +486,10 @@ pub fn generate(ws: &Workspace, out_dir: &Path) -> Result<GenerateReport> {
         .chain(TEMPLATES_INIT)
         .copied()
         .collect();
+    // 选型硬闸：Agent 基础框架须客户技术侧确认后方可构建（其余中间件无需逐项核对）
+    if !cfg.workspace.framework_customer_confirmed {
+        bail!("{}", t!("framework_not_customer_confirmed"));
+    }
     // 契约硬闸：技能须逐条人工确认（模型一律输出 pending），未确认技能不进运行时
     let skills_path = ws.artifact_path(crate::extract::SKILLS_ARTIFACT);
     let skills_raw = if skills_path.exists() {
@@ -768,7 +772,11 @@ mod tests {
         let cfg_path = ws.root.join("icewright.toml");
         let raw = std::fs::read_to_string(&cfg_path)
             .unwrap()
-            .replace("pack = \"\"", "pack = \"insurance/auto-claim@0.1.0\"");
+            .replace("pack = \"\"", "pack = \"insurance/auto-claim@0.1.0\"")
+            .replace(
+                "framework_customer_confirmed = false",
+                "framework_customer_confirmed = true",
+            );
         std::fs::write(&cfg_path, raw).unwrap();
 
         let rules = icewright_artifact::example("rules").unwrap();
@@ -1016,6 +1024,27 @@ mod tests {
         let err = generate(&ws, &ws.root.join("output")).unwrap_err();
         assert!(err.to_string().contains("未获人工确认"), "{err}");
         assert!(err.to_string().contains("SK-progress-query"), "{err}");
+    }
+
+    #[test]
+    fn framework_selection_requires_customer_confirmation() {
+        let ws = setup("fwconfirm");
+        let cfg_path = ws.root.join("icewright.toml");
+        let raw = std::fs::read_to_string(&cfg_path).unwrap().replace(
+            "framework_customer_confirmed = true",
+            "framework_customer_confirmed = false",
+        );
+        std::fs::write(&cfg_path, raw).unwrap();
+        let err = generate(&ws, &ws.root.join("output")).unwrap_err();
+        assert!(err.to_string().contains("客户"), "{err}");
+        assert!(
+            !ws.root.join("output").join("app/main.py").exists(),
+            "未获客户确认时不得写出骨架"
+        );
+        // 客户确认后放行
+        crate::config::set_and_save(&cfg_path, "workspace.framework_customer_confirmed", "true")
+            .unwrap();
+        generate(&ws, &ws.root.join("output")).unwrap();
     }
 
     #[test]
