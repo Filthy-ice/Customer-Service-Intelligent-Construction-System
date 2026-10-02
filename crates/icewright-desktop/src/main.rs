@@ -227,7 +227,7 @@ fn show_window(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-fn open_url(url: &str) {
+fn open_url(url: &str) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     let spawn = std::process::Command::new("xdg-open").arg(url).spawn();
     #[cfg(target_os = "macos")]
@@ -240,13 +240,13 @@ fn open_url(url: &str) {
             .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
             .spawn()
     };
-    let _ = spawn;
+    spawn.map(|_| ()).map_err(|e| e.to_string())
 }
 
 /// 用系统默认浏览器打开项目主页（不引入 opener 插件，保持依赖精简）。
 #[tauri::command]
-fn open_github() {
-    open_url(GITHUB_URL);
+fn open_github() -> Result<(), String> {
+    open_url(GITHUB_URL)
 }
 
 #[tauri::command]
@@ -282,7 +282,13 @@ async fn model_discover(base_url: String, key_ref: Option<String>) -> Result<Vec
 fn handle_menu_action(app: &tauri::AppHandle, id: &str) {
     match id {
         "quit" => app.exit(0),
-        "github" => open_url(GITHUB_URL),
+        "github" => {
+            // 打开失败（如系统未关联默认浏览器）不能让菜单项"点了没动静"：回传前端明示手动地址
+            if let Err(e) = open_url(GITHUB_URL) {
+                eprintln!("open_url failed: {e}");
+                let _ = app.emit("menu-action", "github_failed");
+            }
+        }
         "lang_zh" | "lang_en" => {
             MENU_LANG.store(if id == "lang_en" { 1 } else { 0 }, Ordering::Relaxed);
             let _ = apply_menu(app);

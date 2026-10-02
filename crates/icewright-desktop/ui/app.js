@@ -32,6 +32,8 @@ var DICT = {
       arm: "再点一次确认",
       executing: "{0} 执行中…",
       refresh_fail: "刷新失败：{0}",
+      menu_refreshed: "已刷新 · {0}",
+      open_fail: "系统浏览器打开失败，请手动访问：{0}",
       no_history: "暂无历史记录",
       about_desc: "S1–S8 流水线构建器：把行业规则与流程交给 AI，产出可交付的客服系统。",
       about_github: "GitHub 主页",
@@ -84,6 +86,8 @@ var DICT = {
       arm: "Click again to confirm",
       executing: "{0} running…",
       refresh_fail: "Refresh failed: {0}",
+      menu_refreshed: "Refreshed · {0}",
+      open_fail: "Could not open in system browser, visit manually: {0}",
       no_history: "No history yet",
       about_desc: "S1-S8 pipeline builder: hand industry rules and flows to the AI, get a deliverable customer-service system back.",
       about_github: "GitHub Homepage",
@@ -384,7 +388,11 @@ function hideAbout() { $("about-modal").classList.add("hidden"); }
 function initAbout() {
   $("about-close").onclick = hideAbout;
   $("about-github").onclick = function () {
-    try { invoke("open_github").catch(function () {}); } catch (e) { /* 非 Tauri 环境 */ }
+    try {
+      invoke("open_github").catch(function () {
+        menuNote("✘ " + fmt(U("open_fail"), [GITHUB_URL]));
+      });
+    } catch (e) { /* 非 Tauri 环境 */ }
   };
   $("about-modal").addEventListener("click", function (e) {
     if (e.target === this) { hideAbout(); }
@@ -503,15 +511,30 @@ function initSettings() {
   });
 }
 
+var GITHUB_URL = "https://github.com/Filthy-ice/Ice-Wright";
+
+function menuNote(text) {
+  var res = $("op-result");
+  res.classList.remove("hidden");
+  res.textContent = text;
+}
+
 function initMenuEvents() {
   var ev = window.__TAURI__ && window.__TAURI__.event;
   if (!ev || !ev.listen) { return; }
   ev.listen("menu-action", function (msg) {
     var a = String(msg.payload);
-    if (a === "refresh") { tick(); }
+    if (a === "refresh") {
+      tick().then(function () {
+        menuNote("✔ " + fmt(U("menu_refreshed"), [new Date().toLocaleTimeString()]));
+      });
+    }
     else if (a === "reload") { location.reload(); }
     else if (a === "about") { showAbout(); }
     else if (a === "settings") { openSettings(); }
+    else if (a === "github_failed") {
+      menuNote("✘ " + fmt(U("open_fail"), [GITHUB_URL]));
+    }
     else if (a === "lang:zh") { syncLang("zh"); refresh(); }
     else if (a === "lang:en") { syncLang("en"); refresh(); }
   }).catch(function () {});
