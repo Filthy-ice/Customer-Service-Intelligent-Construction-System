@@ -2,32 +2,42 @@
 package com.icewright.generated.api;
 
 import com.icewright.generated.config.Settings;
+import com.icewright.generated.service.IdentityService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
- * 页面矩阵路由：/admin 开发后台（必含）、/console 业务后台（按开关守卫）。
+ * 页面矩阵路由：/admin 开发后台（必含，仅 developer）、/console 业务后台（按开关守卫，仅 developer/agent）。
  *
  * <p>静态页放在 classpath:/static 下，这里只做 URL 别名转发，
- * 保证三栈页面访问路径完全一致。</p>
+ * 保证三栈页面访问路径完全一致；数据端点各自独立鉴权，页面转发只是第一道闸。</p>
  *
  * @author IceWright builder
  */
 @Controller
 public class PageController {
 
+    private final IdentityService identityService;
+
+    public PageController(IdentityService identityService) {
+        this.identityService = identityService;
+    }
+
     @GetMapping("/admin")
-    public String admin() {
+    public String admin(HttpServletRequest request) {
+        identityService.requireRole(identityService.identify(request), "developer");
         return "forward:/admin.html";
     }
 
     @GetMapping("/console")
-    public String console() {
+    public String console(HttpServletRequest request) {
         if (!Settings.BUSINESS_CONSOLE) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "业务后台未开启");
         }
+        identityService.requireRole(identityService.identify(request), "developer", "agent");
         return "forward:/console.html";
     }
 }

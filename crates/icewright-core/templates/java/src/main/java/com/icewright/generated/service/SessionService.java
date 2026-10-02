@@ -145,8 +145,9 @@ public class SessionService {
             ScanResult<String> page = jedis.scan(cursor, new ScanParams().match(prefix + "*").count(100));
             for (String key : page.getResult()) {
                 String sessionId = key.substring(prefix.length());
-                // msg: 前缀是 msgid 幂等/文件回推登记表（AsyncMessageService），不是会话槽位
-                if (sessionId.startsWith("msg:")) {
+                // msg: 前缀是 msgid 幂等/文件回推登记表（AsyncMessageService），
+                // sess: 前缀是会话归属登记（IdentityService），都不是会话槽位
+                if (sessionId.startsWith("msg:") || sessionId.startsWith("sess:")) {
                     continue;
                 }
                 Map<String, Object> row = new LinkedHashMap<>();

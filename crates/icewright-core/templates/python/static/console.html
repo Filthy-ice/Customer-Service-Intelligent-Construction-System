@@ -38,7 +38,18 @@
   <div id="error"></div>
   <section>
     <p id="note"></p>
-    <p><button id="refresh"></button> <span id="status"></span></p>
+    <p>
+      <button id="refresh"></button> <span id="status"></span>
+    </p>
+    <p style="display:flex;gap:6px;align-items:center;font-size:12px;opacity:.8;flex-wrap:wrap;margin:0 0 8px">
+      <span id="id-label"></span>
+      <input type="text" id="id-user" maxlength="128" style="width:110px;padding:4px 8px;border-radius:8px;border:1px solid #999;background:transparent;color:inherit;font-size:12px">
+      <input type="text" id="id-group" maxlength="128" style="width:100px;padding:4px 8px;border-radius:8px;border:1px solid #999;background:transparent;color:inherit;font-size:12px">
+      <select id="id-role" style="padding:4px 6px;font-size:12px">
+        <option value="developer">developer</option>
+        <option value="agent">agent</option>
+      </select>
+    </p>
     <table id="sessions"></table>
   </section>
 </div>
@@ -47,19 +58,40 @@
 // 待人工关注会话列表：数据来自 /console/sessions（仅规则打标会话，不展示对话内容）。
 var I18N = {
   zh: { title: "业务后台 · 待关注会话", link_chat: "调试聊天页", refresh: "刷新",
-        note: "命中拦截/转人工/禁语规则的会话会出现在这里；页面不展示任何业务数据。",
+        note: "命中拦截/转人工/禁语规则的会话会出现在这里；页面不展示任何业务数据。agent 仅见本组会话。",
         empty: "暂无待关注会话", loaded: "已加载", load_error: "加载失败：",
-        cols: { session_id: "会话 ID", flagged: "命中规则", turns: "对话轮数" } },
+        id_label: "调试身份：用户/组/类型",
+        cols: { session_id: "会话 ID", flagged: "命中规则", turns: "对话轮数", user: "用户", group: "组" } },
   en: { title: "Business Console · Sessions Need Attention", link_chat: "Debug Chat", refresh: "Refresh",
-        note: "Sessions that hit block/handover/forbidden rules appear here; no business data is shown.",
+        note: "Sessions that hit block/handover/forbidden rules appear here; no business data is shown. An agent only sees its own group.",
         empty: "No sessions need attention", loaded: "Loaded", load_error: "Load failed: ",
-        cols: { session_id: "Session ID", flagged: "Matched rule", turns: "Turns" } }
+        id_label: "Debug identity: user/group/role",
+        cols: { session_id: "Session ID", flagged: "Matched rule", turns: "Turns", user: "User", group: "Group" } }
 };
 var lang = localStorage.getItem("iw-lang") || "zh";
 var $ = function (id) { return document.getElementById(id); };
 function D() { return I18N[lang] || I18N.zh; }
 function esc(s) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function initIdentity() {
+  $("id-user").value = localStorage.getItem("iw-cid-user") || "console-user";
+  $("id-group").value = localStorage.getItem("iw-cid-group") || "default";
+  $("id-role").value = localStorage.getItem("iw-cid-role") || "agent";
+  [["user"], ["group"], ["role"]].forEach(function (p) {
+    $("id-" + p[0]).addEventListener("change", function () {
+      localStorage.setItem("iw-cid-" + p[0], this.value.trim());
+      load();
+    });
+  });
+}
+function idHeaders() {
+  return {
+    "X-IW-User": $("id-user").value.trim(),
+    "X-IW-Group": $("id-group").value.trim(),
+    "X-IW-Role": $("id-role").value
+  };
 }
 
 function applyLang() {
@@ -69,12 +101,13 @@ function applyLang() {
   $("link-chat").textContent = d.link_chat;
   $("refresh").textContent = d.refresh;
   $("note").textContent = d.note;
+  $("id-label").textContent = d.id_label;
   $("lang").value = lang;
   document.documentElement.lang = lang;
 }
 
 function load() {
-  fetch("/console/sessions").then(function (r) {
+  fetch("/console/sessions", { headers: idHeaders() }).then(function (r) {
     if (!r.ok) { throw new Error("HTTP " + r.status); }
     return r.json();
   }).then(function (rows) {
@@ -85,7 +118,8 @@ function load() {
       "<thead><tr>" + Object.keys(d.cols).map(function (c) { return "<th>" + d.cols[c] + "</th>"; }).join("") + "</tr></thead><tbody>" +
       rows.map(function (s) {
         return "<tr><td>" + esc(String(s.session_id)) + "</td><td>" + esc(String(s.flagged)) +
-               "</td><td>" + esc(String(s.turns)) + "</td></tr>";
+               "</td><td>" + esc(String(s.turns)) + "</td><td>" + esc(String(s.user || "")) +
+               "</td><td>" + esc(String(s.group || "")) + "</td></tr>";
       }).join("") + "</tbody>";
   }).catch(function (e) {
     $("error").textContent = D().load_error + e.message;
@@ -100,6 +134,7 @@ $("lang").addEventListener("change", function () {
 });
 $("refresh").addEventListener("click", load);
 
+initIdentity();
 applyLang();
 load();
 </script>

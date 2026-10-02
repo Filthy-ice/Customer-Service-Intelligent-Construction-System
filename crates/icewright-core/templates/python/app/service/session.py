@@ -72,14 +72,15 @@ def set_json(suffix: str, value: dict, ttl_seconds: int = SLOTS_TTL_SECONDS) -> 
 def list_sessions() -> list[dict]:
     """枚举本项目全部会话槽位（scan 非 keys，不阻塞 Redis）；只读，不落业务数据。
 
-    msg: 前缀是 msgid 幂等/文件回推登记表（见 asyncmsg），不是会话槽位，跳过。
+    msg: 前缀是 msgid 幂等/文件回推登记表（见 asyncmsg），sess: 前缀是会话归属登记（见 identity），
+    都不是会话槽位，跳过。
     """
     prefix = "iw:%s:" % settings.project
     client = _client()
     out = []
     for key in client.scan_iter(match=prefix + "*"):
         session_id = key[len(prefix):]
-        if session_id.startswith("msg:"):
+        if session_id.startswith("msg:") or session_id.startswith("sess:"):
             continue
         out.append({"session_id": session_id, "slots": load_slots(session_id)})
     return out

@@ -130,7 +130,8 @@ public class ChatService {
             }
         }
         String system = "你是客服系统「" + Settings.PROJECT + "」，遵守以下行业规则要求作答：\n"
-            + rulesBlock.toString().stripTrailing() + "\n" + I18n.t("model_language", lang);
+            + rulesBlock.toString().stripTrailing() + "\n" + I18n.t("model_language", lang)
+            + "\n" + I18n.t("model_guard", lang);
 
         String content = chatClient.prompt()
             .system(system)

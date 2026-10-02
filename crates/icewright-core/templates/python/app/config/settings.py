@@ -22,6 +22,8 @@ class Settings:
     core_mode: str = field(default_factory=lambda: os.getenv("IW_CORE_MODE", "mock"))
     # 非实时交互回推回调（可选；留空=仅轮询 GET /messages/{msgid}/files）
     callback_url: str = field(default_factory=lambda: os.getenv("IW_CALLBACK_URL", ""))
+    # 身份验签共享密钥（X-IW-Sign = HMAC-SHA256(secret, "user|group|role")；留空=调试模式免签）
+    auth_secret: str = field(default_factory=lambda: os.getenv("IW_AUTH_SECRET", ""))
     mysql_host: str = field(default_factory=lambda: os.getenv("IW_MYSQL_HOST", "127.0.0.1"))
     mysql_port: int = field(default_factory=lambda: int(os.getenv("IW_MYSQL_PORT", "3306")))
     mysql_user: str = field(default_factory=lambda: os.getenv("IW_MYSQL_USER", "root"))

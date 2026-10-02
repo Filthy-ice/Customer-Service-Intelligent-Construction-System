@@ -15,6 +15,7 @@ public class ChatRequest {
 
     @JsonProperty("session_id")
     @NotBlank
+    @Pattern(regexp = "^[A-Za-z0-9_.:-]{1,128}$")
     @Size(max = 128)
     private String sessionId;
 

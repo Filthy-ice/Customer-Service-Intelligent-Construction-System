@@ -40,26 +40,47 @@ func writeError(w http.ResponseWriter, detail string) {
 	writeJSON(w, http.StatusBadRequest, map[string]string{"detail": detail})
 }
 
+// writeFail 把 service 层错误编码为线格式 {detail}；APIError 按其状态码返回。
+func writeFail(w http.ResponseWriter, err error) {
+	if apiErr, ok := err.(*service.APIError); ok {
+		writeJSON(w, apiErr.Status, map[string]string{"detail": apiErr.Detail})
+		return
+	}
+	writeJSON(w, http.StatusInternalServerError, map[string]string{"detail": err.Error()})
+}
+
 // Handlers 聚合页面矩阵与只读查询路由：GET /、/admin、/admin/overview、
 // /sessions/{id}、/healthz、POST /chat；/console 与 /console/sessions 按开关守卫。
+// 除 /healthz 外全部先过身份闸门（Identify+归属校验），权限矩阵见设计文档第 9 节。
 type Handlers struct {
 	chat        *service.ChatService
 	async       *service.AsyncService
 	sessions    *service.SessionService
+	identity    *service.IdentityService
 	indexHTML   func(w http.ResponseWriter, r *http.Request)
 	adminHTML   []byte
 	consoleHTML []byte
 }
 
 func NewHandlers(chat *service.ChatService, async *service.AsyncService, sessions *service.SessionService,
+	identity *service.IdentityService,
 	indexHTML func(http.ResponseWriter, *http.Request), adminHTML, consoleHTML []byte) *Handlers {
-	return &Handlers{chat: chat, async: async, sessions: sessions, indexHTML: indexHTML,
+	return &Handlers{chat: chat, async: async, sessions: sessions, identity: identity, indexHTML: indexHTML,
 		adminHTML: adminHTML, consoleHTML: consoleHTML}
 }
 
 func (h *Handlers) Chat(w http.ResponseWriter, r *http.Request) {
 	req, lang, ok := parseChat(w, r)
 	if !ok {
+		return
+	}
+	ident, err := h.identity.Identify(r)
+	if err != nil {
+		writeFail(w, err)
+		return
+	}
+	if err := h.identity.EnsureSession(ident, req.SessionID); err != nil {
+		writeFail(w, err)
 		return
 	}
 	// 带 msgid 幂等：同会话重复 msgid 回放原回执，不重复处理
@@ -82,8 +103,8 @@ func parseChat(w http.ResponseWriter, r *http.Request) (chatRequest, string, boo
 		writeError(w, "请求体不是合法 JSON（字段：session_id/message/language/msgid）")
 		return chatRequest{}, "", false
 	}
-	if req.SessionID == "" || len([]rune(req.SessionID)) > maxSessionIDLen {
-		writeError(w, "session_id 必须非空且不超过 128 字符")
+	if req.SessionID == "" || !validMsgid.MatchString(req.SessionID) {
+		writeError(w, "session_id 仅允许字母/数字/._:-，长度 1~128（安全进 Redis 键）")
 		return chatRequest{}, "", false
 	}
 	if req.Message == "" || len([]rune(req.Message)) > maxMessageLen {
@@ -112,6 +133,15 @@ func (h *Handlers) ChatAsync(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	ident, err := h.identity.Identify(r)
+	if err != nil {
+		writeFail(w, err)
+		return
+	}
+	if err := h.identity.EnsureSession(ident, req.SessionID); err != nil {
+		writeFail(w, err)
+		return
+	}
 	msgid, status, err := h.async.AcceptAsync(req.SessionID, req.MsgID, req.Message, lang)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"detail": err.Error()})
@@ -132,6 +162,15 @@ func (h *Handlers) Messages(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.URL.Query().Get("session_id")
 	if sessionID == "" {
 		writeError(w, "必须携带 session_id（命名空间隔离）")
+		return
+	}
+	ident, err := h.identity.Identify(r)
+	if err != nil {
+		writeFail(w, err)
+		return
+	}
+	if err := h.identity.Viewable(ident, sessionID); err != nil {
+		writeFail(w, err)
 		return
 	}
 	rest := strings.TrimPrefix(r.URL.Path, "/messages/")
@@ -199,25 +238,54 @@ func writeHTML(w http.ResponseWriter, page []byte) {
 	_, _ = w.Write(page)
 }
 
-// Admin 开发后台页（必含，只读）。
+// Admin 开发后台页（必含，只读，仅 developer）。
 func (h *Handlers) Admin(w http.ResponseWriter, r *http.Request) {
+	if !h.gate(w, r, "developer") {
+		return
+	}
 	writeHTML(w, h.adminHTML)
 }
 
-// Console 业务人员后台页：开关未开启时 404，与 python/java 栈一致。
+// Console 业务人员后台页：开关未开启时 404，仅 developer/agent，与 python/java 栈一致。
 func (h *Handlers) Console(w http.ResponseWriter, r *http.Request) {
 	if !config.BusinessConsole {
 		writeJSON(w, http.StatusNotFound, map[string]string{"detail": "业务后台未开启"})
 		return
 	}
+	if !h.gate(w, r, "developer", "agent") {
+		return
+	}
 	writeHTML(w, h.consoleHTML)
 }
 
-// SessionDetail GET /sessions/{id}：调试页槽位回显，只读 Redis 易失状态。
+// gate 身份闸门：先验身份再核角色；失败已写响应返回 false。
+func (h *Handlers) gate(w http.ResponseWriter, r *http.Request, roles ...string) bool {
+	ident, err := h.identity.Identify(r)
+	if err != nil {
+		writeFail(w, err)
+		return false
+	}
+	if err := service.RequireRole(ident, roles...); err != nil {
+		writeFail(w, err)
+		return false
+	}
+	return true
+}
+
+// SessionDetail GET /sessions/{id}：调试页槽位回显，只读 Redis 易失状态；非所有者 403。
 func (h *Handlers) SessionDetail(w http.ResponseWriter, r *http.Request) {
 	sessionID := strings.TrimPrefix(r.URL.Path, "/sessions/")
 	if sessionID == "" || sessionID == r.URL.Path {
 		writeError(w, "路径应为 /sessions/{session_id}")
+		return
+	}
+	ident, err := h.identity.Identify(r)
+	if err != nil {
+		writeFail(w, err)
+		return
+	}
+	if err := h.identity.Viewable(ident, sessionID); err != nil {
+		writeFail(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -234,13 +302,17 @@ type adminOverviewBody struct {
 	ModelConfigured bool                 `json:"model_configured"`
 	CoreMode        string               `json:"core_mode"`
 	BusinessConsole bool                 `json:"business_console"`
+	AuthMode        string               `json:"auth_mode"`
 	Rules           []domain.Rule        `json:"rules"`
 	Skills          []domain.Skill       `json:"skills"`
 	APIs            []domain.APIContract `json:"apis"`
 }
 
-// AdminOverview 开发后台总览：运行态 + 规则/技能/接口契约（编译进项目的数据文件）。
+// AdminOverview 开发后台总览：运行态 + 规则/技能/接口契约（编译进项目的数据文件），仅 developer。
 func (h *Handlers) AdminOverview(w http.ResponseWriter, r *http.Request) {
+	if !h.gate(w, r, "developer") {
+		return
+	}
 	rules, err := domain.LoadRules()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"detail": err.Error()})
@@ -273,6 +345,7 @@ func (h *Handlers) AdminOverview(w http.ResponseWriter, r *http.Request) {
 		ModelConfigured: config.ModelBaseURL != "" && config.ModelName != "" && config.ModelAPIKey != "",
 		CoreMode:        config.CoreMode,
 		BusinessConsole: config.BusinessConsole,
+		AuthMode:        authModeLabel(),
 		Rules:           rules,
 		Skills:          skills,
 		APIs:            apis,
@@ -283,12 +356,30 @@ type consoleSessionRow struct {
 	SessionID string `json:"session_id"`
 	Flagged   string `json:"flagged"`
 	Turns     any    `json:"turns"`
+	User      string `json:"user"`
+	Group     string `json:"group"`
 }
 
-// ConsoleSessions 业务后台待关注会话列表：仅规则打标的会话。
+func authModeLabel() string {
+	if service.DevMode() {
+		return "debug(未配 IW_AUTH_SECRET，免签仅调试)"
+	}
+	return "hmac"
+}
+
+// ConsoleSessions 业务后台待关注会话列表：仅规则打标的会话；agent 只见本组，developer 见全部。
 func (h *Handlers) ConsoleSessions(w http.ResponseWriter, r *http.Request) {
 	if !config.BusinessConsole {
 		writeJSON(w, http.StatusNotFound, map[string]string{"detail": "业务后台未开启"})
+		return
+	}
+	ident, err := h.identity.Identify(r)
+	if err != nil {
+		writeFail(w, err)
+		return
+	}
+	if err := service.RequireRole(ident, "developer", "agent"); err != nil {
+		writeFail(w, err)
 		return
 	}
 	rows := make([]consoleSessionRow, 0)
@@ -297,11 +388,20 @@ func (h *Handlers) ConsoleSessions(w http.ResponseWriter, r *http.Request) {
 		if flagged == "" {
 			continue
 		}
+		owner, _ := h.sessions.GetRecord("sess:" + item.SessionID)
+		ownerGroup, _ := owner["group"].(string)
+		ownerUser, _ := owner["user"].(string)
+		if ident.Role == "agent" && ownerGroup != ident.Group {
+			continue
+		}
 		turns := item.Slots["turns"]
 		if turns == nil {
 			turns = 0
 		}
-		rows = append(rows, consoleSessionRow{SessionID: item.SessionID, Flagged: flagged, Turns: turns})
+		rows = append(rows, consoleSessionRow{
+			SessionID: item.SessionID, Flagged: flagged, Turns: turns,
+			User: ownerUser, Group: ownerGroup,
+		})
 	}
 	writeJSON(w, http.StatusOK, rows)
 }

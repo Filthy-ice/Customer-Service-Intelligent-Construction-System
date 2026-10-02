@@ -35,7 +35,8 @@ func main() {
 		log.Fatalf("规则装载失败: %v", err)
 	}
 	async := service.NewAsyncService(chat, sessions)
-	handlers := web.NewHandlers(chat, async, sessions, func(w http.ResponseWriter, r *http.Request) {
+	identity := service.NewIdentityService(sessions)
+	handlers := web.NewHandlers(chat, async, sessions, identity, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write(index)
 	}, admin, console)

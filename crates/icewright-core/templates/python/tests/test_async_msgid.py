@@ -12,6 +12,7 @@ import pytest
 
 from app.api import routes
 from app.service import asyncmsg
+from app.service.identity import Identity
 from app.service import session as session_service
 
 pytestmark = pytest.mark.skipif(
@@ -22,6 +23,9 @@ pytestmark = pytest.mark.skipif(
 def _uid() -> str:
     """键带随机后缀：Redis 记录跨测试轮次存续，固定 msgid 会命中上轮缓存导致幂等断言失真。"""
     return uuid4().hex[:8]
+
+
+_IDENT = Identity("t-user", "t-group", "customer", False)
 
 
 def _req(session_id: str, message: str, msgid: str | None = None) -> routes.ChatRequest:
@@ -44,8 +48,8 @@ def _counting_answers(monkeypatch) -> list:
 def test_same_msgid_processed_once(monkeypatch):
     calls = _counting_answers(monkeypatch)
     s, m = "s-dup-%s" % _uid(), "m-dup-%s" % _uid()
-    r1 = routes.chat(_req(s, "理赔需要哪些材料", m))
-    r2 = routes.chat(_req(s, "理赔需要哪些材料", m))
+    r1 = routes.chat(_req(s, "理赔需要哪些材料", m), _IDENT)
+    r2 = routes.chat(_req(s, "理赔需要哪些材料", m), _IDENT)
     assert r1.model_dump() == r2.model_dump()
     assert len(calls) == 1
 
@@ -53,8 +57,8 @@ def test_same_msgid_processed_once(monkeypatch):
 def test_different_msgid_both_processed(monkeypatch):
     calls = _counting_answers(monkeypatch)
     s = "s-two-%s" % _uid()
-    routes.chat(_req(s, "第一句", "m-a-%s" % _uid()))
-    routes.chat(_req(s, "第二句", "m-b-%s" % _uid()))
+    routes.chat(_req(s, "第一句", "m-a-%s" % _uid()), _IDENT)
+    routes.chat(_req(s, "第二句", "m-b-%s" % _uid()), _IDENT)
     assert len(calls) == 2
 
 
@@ -65,14 +69,14 @@ def test_msgid_charset_rejected():
 
 def test_async_roundtrip_files_and_download():
     s, m = "s-async-%s" % _uid(), "m-async-%s" % _uid()
-    accepted = routes.chat_async(_req(s, "帮我导出理赔材料清单", m))
+    accepted = routes.chat_async(_req(s, "帮我导出理赔材料清单", m), _IDENT)
     assert accepted["status"] == "accepted"
     view = _wait_done(s, m)
     assert view["status"] == "ready"
     assert len(view["files"]) == 1
     f = view["files"][0]
     assert f["download_url"].startswith("/messages/%s/files/" % m)
-    resp = routes.message_file(m, f["file_id"], s)
+    resp = routes.message_file(m, f["file_id"], s, _IDENT)
     payload = json.loads(Path(resp.path).read_text(encoding="utf-8"))
     assert payload["session_id"] == s and payload["msgid"] == m
     assert payload["reply"]
@@ -80,30 +84,30 @@ def test_async_roundtrip_files_and_download():
 
 def test_async_resubmit_is_idempotent():
     s, m = "s-re-%s" % _uid(), "m-re-%s" % _uid()
-    routes.chat_async(_req(s, "重复提交测试", m))
-    again = routes.chat_async(_req(s, "重复提交测试", m))
+    routes.chat_async(_req(s, "重复提交测试", m), _IDENT)
+    again = routes.chat_async(_req(s, "重复提交测试", m), _IDENT)
     assert again["status"] in ("accepted", "ready", "failed")
     _wait_done(s, m)
     # 幂等：二次受理没有再排任务——结果文件只有一份登记
-    view = routes.message_files(m, s)
+    view = routes.message_files(m, s, _IDENT)
     assert len(view["files"]) == 1
 
 
 def test_msgid_isolated_by_session_namespace():
     s_a, m = "s-iso-a-%s" % _uid(), "m-iso-%s" % _uid()
-    routes.chat_async(_req(s_a, "甲会话消息", m))
+    routes.chat_async(_req(s_a, "甲会话消息", m), _IDENT)
     assert asyncmsg.record_of("s-iso-b-%s" % _uid(), m) is None
     view = _wait_done(s_a, m)
     assert view["status"] == "ready"
     with pytest.raises(Exception):
-        routes.message_files(m, "s-iso-b-%s" % _uid())  # 裸 msgid 跨会话取不到
+        routes.message_files(m, "s-iso-b-%s" % _uid(), _IDENT)  # 裸 msgid 跨会话取不到
 
 
 def _wait_done(session_id: str, msgid: str, timeout_s: float = 40.0) -> dict:
     # 上限须大于模型兜底超时：未配置模型时异步任务在模型超时后仍会落 ready/failed，不该被误判悬挂
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
-        view = routes.message_files(msgid, session_id)
+        view = routes.message_files(msgid, session_id, _IDENT)
         if view["status"] in ("ready", "failed"):
             return view
         time.sleep(0.05)

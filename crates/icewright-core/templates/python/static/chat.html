@@ -41,6 +41,16 @@
     <input type="text" id="input" autocomplete="off" maxlength="4000">
     <button type="submit" id="send"></button>
   </form>
+  <div style="display:flex;gap:6px;align-items:center;font-size:12px;opacity:.75;flex-wrap:wrap">
+    <span id="id-label"></span>
+    <input type="text" id="id-user" maxlength="128" style="width:110px;padding:4px 8px;border-radius:8px;border:1px solid #999;background:transparent;color:inherit;font-size:12px">
+    <input type="text" id="id-group" maxlength="128" style="width:100px;padding:4px 8px;border-radius:8px;border:1px solid #999;background:transparent;color:inherit;font-size:12px">
+    <select id="id-role" style="padding:4px 6px;font-size:12px">
+      <option value="customer">customer</option>
+      <option value="agent">agent</option>
+      <option value="developer">developer</option>
+    </select>
+  </div>
 </div>
 <script>
 "use strict";
@@ -48,10 +58,12 @@
 var I18N = {
   zh: { title: "客服助手", send: "发送", input_placeholder: "请输入您的问题…",
         thinking: "正在思考…", error_prefix: "请求失败：", rule_note: "命中规则",
-        slots_note: "会话槽位", admin_link: "开发后台" },
+        slots_note: "会话槽位", admin_link: "开发后台",
+        id_label: "调试身份（网关注入的头，此处直连模拟）：用户/组/类型" },
   en: { title: "Service Agent", send: "Send", input_placeholder: "Type your question…",
         thinking: "Thinking…", error_prefix: "Request failed: ", rule_note: "Matched rules",
-        slots_note: "Session slots", admin_link: "Developer console" }
+        slots_note: "Session slots", admin_link: "Developer console",
+        id_label: "Debug identity (simulates gateway-injected headers): user/group/role" }
 };
 var lang = localStorage.getItem("iw-lang") || "zh";
 var sessionId = localStorage.getItem("iw-session") || ("web-" + Math.random().toString(36).slice(2, 10));
@@ -59,12 +71,32 @@ localStorage.setItem("iw-session", sessionId);
 
 var $ = function (id) { return document.getElementById(id); };
 
+// 身份头：生产由客户网关注入并签名；此页仅调试模式（未配 IW_AUTH_SECRET）可用。
+function initIdentity() {
+  $("id-user").value = localStorage.getItem("iw-id-user") || "web-user";
+  $("id-group").value = localStorage.getItem("iw-id-group") || "default";
+  $("id-role").value = localStorage.getItem("iw-id-role") || "customer";
+  [["id-user"], ["id-group"], ["id-role"]].forEach(function (p) {
+    $(p[0]).addEventListener("change", function () {
+      localStorage.setItem("iw-id-" + p[0].slice(3), this.value.trim());
+    });
+  });
+}
+function idHeaders(extra) {
+  var h = extra || {};
+  h["X-IW-User"] = $("id-user").value.trim();
+  h["X-IW-Group"] = $("id-group").value.trim();
+  h["X-IW-Role"] = $("id-role").value;
+  return h;
+}
+
 function applyLang() {
   var d = I18N[lang] || I18N.zh;
   $("title").textContent = d.title;
   $("send").textContent = d.send;
   $("input").placeholder = d.input_placeholder;
   $("link-admin").textContent = d.admin_link;
+  $("id-label").textContent = d.id_label;
   $("lang").value = lang;
   document.documentElement.lang = lang;
 }
@@ -86,7 +118,7 @@ function addMsg(role, text, meta) {
 
 function showSlots(bubble) {
   // 调试页专有的槽位回显：读取本会话在 Redis 中的易失状态，失败不影响对话本身。
-  fetch("/sessions/" + encodeURIComponent(sessionId)).then(function (r) {
+  fetch("/sessions/" + encodeURIComponent(sessionId), { headers: idHeaders() }).then(function (r) {
     return r.ok ? r.json() : null;
   }).then(function (d) {
     if (!d || !d.slots) { return; }
@@ -116,7 +148,7 @@ $("chat-form").addEventListener("submit", function (ev) {
   var pending = addMsg("bot", (I18N[lang] || I18N.zh).thinking);
   fetch("/chat", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: idHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ session_id: sessionId, message: text, language: lang })
   }).then(function (resp) {
     if (!resp.ok) { throw new Error("HTTP " + resp.status); }
@@ -139,6 +171,7 @@ $("chat-form").addEventListener("submit", function (ev) {
   });
 });
 
+initIdentity();
 applyLang();
 </script>
 </body>

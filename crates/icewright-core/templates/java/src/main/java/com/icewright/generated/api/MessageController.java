@@ -3,6 +3,8 @@ package com.icewright.generated.api;
 
 import com.icewright.generated.api.dto.ChatRequest;
 import com.icewright.generated.service.AsyncMessageService;
+import com.icewright.generated.service.IdentityService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.HttpStatus;
@@ -30,28 +32,35 @@ import java.util.Map;
 public class MessageController {
 
     private final AsyncMessageService asyncMessageService;
+    private final IdentityService identityService;
 
-    public MessageController(AsyncMessageService asyncMessageService) {
+    public MessageController(AsyncMessageService asyncMessageService, IdentityService identityService) {
         this.asyncMessageService = asyncMessageService;
+        this.identityService = identityService;
     }
 
-    /** 异步受理：立即回执 accepted，后台线程处理完写结果文件；重复 msgid 幂等。 */
+    /** 异步受理：立即回执 accepted，后台线程处理完写结果文件；重复 msgid 幂等。会话首用绑定身份归属。 */
     @PostMapping("/chat/async")
     @ResponseStatus(HttpStatus.ACCEPTED)
-    public Map<String, Object> chatAsync(@Valid @RequestBody ChatRequest request) {
+    public Map<String, Object> chatAsync(
+        @Valid @RequestBody ChatRequest request, HttpServletRequest httpRequest) {
+        IdentityService.Identity identity = identityService.identify(httpRequest);
+        identityService.ensureSession(identity, request.getSessionId());
         return asyncMessageService.acceptAsync(
             request.getSessionId(), request.getMsgid(), request.getMessage(), request.getLanguage());
     }
 
-    /** 轮询取回：凭 会话+msgid 双段键查状态与文件清单（严禁裸 msgid 全局取回）。 */
+    /** 轮询取回：凭 会话+msgid 双段键查状态与文件清单（严禁裸 msgid 全局取回；非所有者 403）。 */
     @GetMapping("/messages/{msgid}/files")
     public Map<String, Object> messageFiles(
         @PathVariable("msgid") String msgid,
-        @RequestParam(name = "session_id", defaultValue = "") String sessionId) {
+        @RequestParam(name = "session_id", defaultValue = "") String sessionId,
+        HttpServletRequest httpRequest) {
         if (sessionId.isEmpty()) {
             throw new ResponseStatusException(
                 HttpStatus.BAD_REQUEST, "必须携带 session_id（命名空间隔离）");
         }
+        identityService.viewable(identityService.identify(httpRequest), sessionId);
         Map<String, Object> view = asyncMessageService.filesView(sessionId, msgid);
         if (view == null) {
             throw new ResponseStatusException(
@@ -65,8 +74,9 @@ public class MessageController {
     public ResponseEntity<FileSystemResource> messageFile(
         @PathVariable("msgid") String msgid,
         @PathVariable("fileId") String fileId,
-        @RequestParam(name = "session_id", defaultValue = "") String sessionId) {
-        Map<String, Object> view = messageFiles(msgid, sessionId);
+        @RequestParam(name = "session_id", defaultValue = "") String sessionId,
+        HttpServletRequest httpRequest) {
+        Map<String, Object> view = messageFiles(msgid, sessionId, httpRequest);
         boolean registered = false;
         if (view.get("files") instanceof List<?> files) {
             registered = files.stream()

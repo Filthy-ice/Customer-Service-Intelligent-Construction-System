@@ -19,6 +19,7 @@ public record AdminOverviewResponse(
     @JsonProperty("model_configured") boolean modelConfigured,
     @JsonProperty("core_mode") String coreMode,
     @JsonProperty("business_console") boolean businessConsole,
+    @JsonProperty("auth_mode") String authMode,
     List<Map<String, Object>> rules,
     List<Map<String, Object>> skills,
     List<Map<String, Object>> apis) {

@@ -30,6 +30,9 @@ var (
 
 	// CallbackURL 是非实时交互回推回调（空=仅轮询 GET /messages/{msgid}/files）。
 	CallbackURL = os.Getenv("IW_CALLBACK_URL")
+
+	// AuthSecret 是身份验签共享密钥（空=调试模式免签；生产必配，配套 X-IW-* 请求头，见设计文档第 9 节）。
+	AuthSecret = os.Getenv("IW_AUTH_SECRET")
 )
 
 func envOr(name, fallback string) string {

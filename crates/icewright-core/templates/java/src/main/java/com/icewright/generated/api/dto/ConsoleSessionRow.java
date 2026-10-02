@@ -11,5 +11,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 public record ConsoleSessionRow(
     @JsonProperty("session_id") String sessionId,
     String flagged,
-    Object turns) {
+    Object turns,
+    String user,
+    String group) {
 }

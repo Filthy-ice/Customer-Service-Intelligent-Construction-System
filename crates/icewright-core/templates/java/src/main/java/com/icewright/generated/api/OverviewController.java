@@ -9,7 +9,9 @@ import com.icewright.generated.domain.ApisRegistry;
 import com.icewright.generated.domain.I18n;
 import com.icewright.generated.domain.RulesEngine;
 import com.icewright.generated.domain.SkillsRegistry;
+import com.icewright.generated.service.IdentityService;
 import com.icewright.generated.service.SessionService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -34,18 +36,22 @@ public class OverviewController {
     private static final String SLOT_TURNS = "turns";
 
     private final SessionService sessionService;
+    private final IdentityService identityService;
 
-    public OverviewController(SessionService sessionService) {
+    public OverviewController(SessionService sessionService, IdentityService identityService) {
         this.sessionService = sessionService;
+        this.identityService = identityService;
     }
 
     @GetMapping("/sessions/{sessionId}")
-    public SessionDetailResponse sessionDetail(@PathVariable String sessionId) {
+    public SessionDetailResponse sessionDetail(@PathVariable String sessionId, HttpServletRequest request) {
+        identityService.viewable(identityService.identify(request), sessionId);
         return new SessionDetailResponse(sessionId, sessionService.loadSlots(sessionId));
     }
 
     @GetMapping("/admin/overview")
-    public AdminOverviewResponse adminOverview() {
+    public AdminOverviewResponse adminOverview(HttpServletRequest request) {
+        identityService.requireRole(identityService.identify(request), "developer");
         return new AdminOverviewResponse(
             Settings.PROJECT,
             Settings.PACK_REF,
@@ -54,16 +60,20 @@ public class OverviewController {
             Settings.modelConfigured(),
             Settings.CORE_MODE,
             Settings.BUSINESS_CONSOLE,
+            identityService.devMode() ? "debug(未配 IW_AUTH_SECRET，免签仅调试)" : "hmac",
             RulesEngine.loadRules(),
             SkillsRegistry.loadSkills(),
             ApisRegistry.loadApis());
     }
 
+    /** 业务后台会话列表：仅返回被规则打标的会话；agent 只见本组，developer 见全部。 */
     @GetMapping("/console/sessions")
-    public List<ConsoleSessionRow> consoleSessions() {
+    public List<ConsoleSessionRow> consoleSessions(HttpServletRequest request) {
         if (!Settings.BUSINESS_CONSOLE) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "业务后台未开启");
         }
+        IdentityService.Identity identity = identityService.identify(request);
+        identityService.requireRole(identity, "developer", "agent");
         List<ConsoleSessionRow> rows = new ArrayList<>();
         for (Map<String, Object> item : sessionService.listSessions()) {
             Object slotsRaw = item.get("slots");
@@ -71,11 +81,18 @@ public class OverviewController {
                 continue;
             }
             Object flagged = slots.get(SLOT_FLAGGED);
-            if (flagged != null && !String.valueOf(flagged).isEmpty()) {
-                Object turns = slots.containsKey(SLOT_TURNS) ? slots.get(SLOT_TURNS) : 0;
-                rows.add(new ConsoleSessionRow(
-                    String.valueOf(item.get("session_id")), String.valueOf(flagged), turns));
+            if (flagged == null || String.valueOf(flagged).isEmpty()) {
+                continue;
             }
+            String sessionId = String.valueOf(item.get("session_id"));
+            Map<String, Object> owner = sessionService.getRecord("sess:" + sessionId);
+            String ownerUser = owner == null ? "" : String.valueOf(owner.getOrDefault("user", ""));
+            String ownerGroup = owner == null ? "" : String.valueOf(owner.getOrDefault("group", ""));
+            if ("agent".equals(identity.role()) && !identity.group().equals(ownerGroup)) {
+                continue;
+            }
+            Object turns = slots.containsKey(SLOT_TURNS) ? slots.get(SLOT_TURNS) : 0;
+            rows.add(new ConsoleSessionRow(sessionId, String.valueOf(flagged), turns, ownerUser, ownerGroup));
         }
         return rows;
     }

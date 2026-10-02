@@ -20,7 +20,7 @@ impl Check {
     }
 }
 
-const REQUIRED_FILES_PY: [&str; 7] = [
+const REQUIRED_FILES_PY: [&str; 8] = [
     "requirements.txt",
     "app/main.py",
     "app/data/rules.json",
@@ -28,9 +28,10 @@ const REQUIRED_FILES_PY: [&str; 7] = [
     "app/domain/i18n.py",
     "static/chat.html",
     "app/service/asyncmsg.py",
+    "app/service/identity.py",
 ];
 
-const REQUIRED_FILES_JAVA: [&str; 7] = [
+const REQUIRED_FILES_JAVA: [&str; 8] = [
     "pom.xml",
     "src/main/java/com/icewright/generated/IcewrightApplication.java",
     "src/main/resources/data/rules.json",
@@ -38,9 +39,10 @@ const REQUIRED_FILES_JAVA: [&str; 7] = [
     "src/main/java/com/icewright/generated/domain/I18n.java",
     "src/main/resources/static/index.html",
     "src/main/java/com/icewright/generated/service/AsyncMessageService.java",
+    "src/main/java/com/icewright/generated/service/IdentityService.java",
 ];
 
-const REQUIRED_FILES_GO: [&str; 7] = [
+const REQUIRED_FILES_GO: [&str; 8] = [
     "go.mod",
     "main.go",
     "assets/rules.json",
@@ -48,6 +50,7 @@ const REQUIRED_FILES_GO: [&str; 7] = [
     "domain/i18n.go",
     "static/index.html",
     "service/asyncmsg.go",
+    "service/identity.go",
 ];
 
 fn required_files(stack: &str) -> &'static [&'static str] {

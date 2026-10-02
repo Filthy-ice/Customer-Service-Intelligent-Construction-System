@@ -23,6 +23,10 @@
 #   curl 'localhost:8000/messages/task-001/files?session_id=s1'   # 轮询状态与文件清单（msgid 须配 session_id）
 #   curl -OJ 'localhost:8000/messages/task-001/files/<file_id>?session_id=s1'   # 下载结果文件
 #   配 IW_CALLBACK_URL 即启用推送模式（webhook 带同一 file_id，消费端按 msgid 幂等重放安全）。
+#   身份与隔离（三栈同形契约，设计文档第 9 节）：请求带 X-IW-User / X-IW-Group / X-IW-Role
+#   （developer|agent|customer）三类头，生产配 IW_AUTH_SECRET 后还须 X-IW-Sign=
+#   HMAC-SHA256(secret,"user|group|role")；会话首用绑定用户+组，越权 403，agent 后台仅见本组。
+#   未配密钥=调试模式：本机免签直开（默认视为开发者），页面身份条可切换模拟用户。
 #   curl localhost:8000/healthz
 #
 # 测试：pytest tests/

@@ -39,10 +39,11 @@ async def _agent_reply(message: str, injections: list[str], language: str) -> st
     from agentscope.model import OpenAIChatModel
 
     _require_configured()
-    system = "你是客服系统「%s」，遵守以下行业规则要求作答：\n%s\n%s" % (
+    system = "你是客服系统「%s」，遵守以下行业规则要求作答：\n%s\n%s\n%s" % (
         settings.project,
         "\n".join("- " + s for s in injections) or "- 无附加规则",
         i18n.t("model_language", language),
+        i18n.t("model_guard", language),
     )
     model = OpenAIChatModel(
         credential=OpenAICredential(

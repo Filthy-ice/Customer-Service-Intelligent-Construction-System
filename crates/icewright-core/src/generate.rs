@@ -64,6 +64,10 @@ static TEMPLATES_PY: &[(&str, &str)] = &[
         include_str!("../templates/python/app/service/session.py"),
     ),
     (
+        "app/service/identity.py",
+        include_str!("../templates/python/app/service/identity.py"),
+    ),
+    (
         "app/service/chat.py",
         include_str!("../templates/python/app/service/chat.py"),
     ),
@@ -126,6 +130,10 @@ static TEMPLATES_PY: &[(&str, &str)] = &[
     (
         "tests/test_async_msgid.py",
         include_str!("../templates/python/tests/test_async_msgid.py"),
+    ),
+    (
+        "tests/test_identity_isolation.py",
+        include_str!("../templates/python/tests/test_identity_isolation.py"),
     ),
 ];
 
@@ -211,6 +219,10 @@ static TEMPLATES_JAVA: &[(&str, &str)] = &[
         include_str!("../templates/java/src/main/java/com/icewright/generated/service/SessionService.java"),
     ),
     (
+        "src/main/java/com/icewright/generated/service/IdentityService.java",
+        include_str!("../templates/java/src/main/java/com/icewright/generated/service/IdentityService.java"),
+    ),
+    (
         "src/main/java/com/icewright/generated/service/ChatService.java",
         include_str!("../templates/java/src/main/java/com/icewright/generated/service/ChatService.java"),
     ),
@@ -253,6 +265,10 @@ static TEMPLATES_JAVA: &[(&str, &str)] = &[
     (
         "src/test/java/com/icewright/generated/service/AsyncMessageContractTest.java",
         include_str!("../templates/java/src/test/java/com/icewright/generated/service/AsyncMessageContractTest.java"),
+    ),
+    (
+        "src/test/java/com/icewright/generated/service/IdentityIsolationTest.java",
+        include_str!("../templates/java/src/test/java/com/icewright/generated/service/IdentityIsolationTest.java"),
     ),
 ];
 
@@ -309,6 +325,10 @@ static TEMPLATES_GO: &[(&str, &str)] = &[
         include_str!("../templates/go/service/session.go"),
     ),
     (
+        "service/identity.go",
+        include_str!("../templates/go/service/identity.go"),
+    ),
+    (
         "service/chat.go",
         include_str!("../templates/go/service/chat.go"),
     ),
@@ -319,6 +339,10 @@ static TEMPLATES_GO: &[(&str, &str)] = &[
     (
         "service/asyncmsg_test.go",
         include_str!("../templates/go/service/asyncmsg_test.go"),
+    ),
+    (
+        "service/identity_test.go",
+        include_str!("../templates/go/service/identity_test.go"),
     ),
     (
         "web/handlers.go",

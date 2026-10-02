@@ -64,8 +64,8 @@ func (c *ChatService) callModel(message string, injections []string, language st
 		}
 		bullets = strings.Join(lines, "\n")
 	}
-	system := fmt.Sprintf("你是客服系统「%s」，遵守以下行业规则要求作答：\n%s\n%s",
-		config.Project, bullets, domain.T("model_language", language, nil))
+	system := fmt.Sprintf("你是客服系统「%s」，遵守以下行业规则要求作答：\n%s\n%s\n%s",
+		config.Project, bullets, domain.T("model_language", language, nil), domain.T("model_guard", language, nil))
 
 	temperature := float32(0)
 	chatModel, err := openai.NewChatModel(context.Background(), &openai.ChatModelConfig{

@@ -131,8 +131,9 @@ func (s *SessionService) ListSessions() []SessionRow {
 		}
 		for _, key := range keys {
 			sessionID := strings.TrimPrefix(key, prefix)
-			// msg: 前缀是 msgid 幂等/文件回推登记表（asyncmsg），不是会话槽位
-			if strings.HasPrefix(sessionID, "msg:") {
+			// msg: 前缀是 msgid 幂等/文件回推登记表（asyncmsg），
+			// sess: 前缀是会话归属登记（identity），都不是会话槽位
+			if strings.HasPrefix(sessionID, "msg:") || strings.HasPrefix(sessionID, "sess:") {
 				continue
 			}
 			out = append(out, SessionRow{SessionID: sessionID, Slots: s.LoadSlots(sessionID)})

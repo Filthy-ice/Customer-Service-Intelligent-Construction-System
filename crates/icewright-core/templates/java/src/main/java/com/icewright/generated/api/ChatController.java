@@ -4,6 +4,8 @@ package com.icewright.generated.api;
 import com.icewright.generated.api.dto.ChatRequest;
 import com.icewright.generated.api.dto.ChatResponse;
 import com.icewright.generated.service.AsyncMessageService;
+import com.icewright.generated.service.IdentityService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -13,7 +15,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * HTTP 层：入参校验与响应模型，业务逻辑一律下沉到 service。
+ * HTTP 层：入参校验、身份闸门与响应模型，业务逻辑一律下沉到 service。
  *
  * @author IceWright builder
  */
@@ -21,14 +23,18 @@ import java.util.Map;
 public class ChatController {
 
     private final AsyncMessageService asyncMessageService;
+    private final IdentityService identityService;
 
-    public ChatController(AsyncMessageService asyncMessageService) {
+    public ChatController(AsyncMessageService asyncMessageService, IdentityService identityService) {
         this.asyncMessageService = asyncMessageService;
+        this.identityService = identityService;
     }
 
-    /** 同步对话；带 msgid 时幂等——同会话重复 msgid 回放原回执，不重复处理。 */
+    /** 同步对话；带 msgid 时幂等——同会话重复 msgid 回放原回执，不重复处理。会话首用绑定身份归属。 */
     @PostMapping("/chat")
-    public ChatResponse chat(@Valid @RequestBody ChatRequest request) {
+    public ChatResponse chat(@Valid @RequestBody ChatRequest request, HttpServletRequest httpRequest) {
+        IdentityService.Identity identity = identityService.identify(httpRequest);
+        identityService.ensureSession(identity, request.getSessionId());
         Map<String, Object> result = asyncMessageService.answerIdempotent(
             request.getSessionId(), request.getMsgid(), request.getMessage(), request.getLanguage());
         @SuppressWarnings("unchecked")
