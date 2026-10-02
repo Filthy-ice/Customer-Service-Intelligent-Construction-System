@@ -122,6 +122,7 @@ var DICT = {
       pf_fail: "预检未通过：修复 FAIL 项后重试",
       env_stale_banner: "S2 环境预检未通过：其后的绿色状态均为历史记录；修复 FAIL 项并重跑预检之前，后续所有推进操作都会被拒绝。",
       stale_tag: "历史记录",
+      hist_prev: "上一页", hist_next: "下一页", hist_page: "第 {0} / {1} 页",
     },
   },
   en: {
@@ -242,6 +243,7 @@ var DICT = {
       pf_fail: "Preflight failed: fix the FAIL items and retry",
       env_stale_banner: "S2 preflight failed: the green statuses after it are historical records. Until the failed checks are fixed and preflight re-runs, every downstream stage refuses to advance.",
       stale_tag: "historical",
+      hist_prev: "Prev", hist_next: "Next", hist_page: "Page {0} of {1}",
     },
   },
 };
@@ -584,21 +586,42 @@ function initActions() {
 
 function titleOf(id) { return L().stage[id] || id; }
 
+var HIST_PAGE_SIZE = 20;
+var histItems = [];
+var histPage = 0;
+
 function paintHistory(events) {
+  histItems = events.slice().reverse();
+  histRender();
+}
+
+function histRender() {
   var ul = $("history");
+  var pager = $("hist-pager");
   ul.innerHTML = "";
-  if (!events.length) {
+  if (!histItems.length) {
     ul.innerHTML = "<li class='hint'>" + esc(U("no_history")) + "</li>";
+    pager.classList.add("hidden");
     return;
   }
-  events.slice().reverse().forEach(function (e) {
-    var li = document.createElement("li");
-    li.innerHTML =
-      "<span class='ts'>" + fmtTs(e.ts) + "</span>" +
-      "<span class='stage'>" + esc(e.stage) + "</span>" +
-      "<span class='detail'>" + esc(e.detail) + "</span>";
-    ul.appendChild(li);
-  });
+  var pages = Math.max(1, Math.ceil(histItems.length / HIST_PAGE_SIZE));
+  if (histPage >= pages) { histPage = pages - 1; }
+  if (histPage < 0) { histPage = 0; }
+  histItems.slice(histPage * HIST_PAGE_SIZE, histPage * HIST_PAGE_SIZE + HIST_PAGE_SIZE)
+    .forEach(function (e) {
+      var li = document.createElement("li");
+      li.innerHTML =
+        "<span class='ts'>" + fmtTs(e.ts) + "</span>" +
+        "<span class='stage'>" + esc(e.stage) + "</span>" +
+        "<span class='detail'>" + esc(e.detail) + "</span>";
+      ul.appendChild(li);
+    });
+  pager.classList.toggle("hidden", pages <= 1);
+  $("hist-prev").textContent = "‹ " + U("hist_prev");
+  $("hist-next").textContent = U("hist_next") + " ›";
+  $("hist-page-label").textContent = fmt(U("hist_page"), [histPage + 1, pages]);
+  $("hist-prev").disabled = histPage === 0;
+  $("hist-next").disabled = histPage >= pages - 1;
 }
 
 /* ---------- 明细标签：流程 / 需求语料 / 生成项目 ---------- */
@@ -647,6 +670,7 @@ function markActive(ulId, rel) {
 }
 
 function resetPanes() {
+  histPage = 0;
   corpusRel = null; corpusBase = "";
   outRel = null; outBase = "";
   ["corpus", "output"].forEach(function (k) {
@@ -895,6 +919,13 @@ function initViewTabs() {
   $("delivery-dir").addEventListener("keydown", function (e) {
     if (e.key === "Enter") { confirmDelivery(); }
   });
+  $("hist-prev").onclick = function () {
+    if (histPage > 0) { histPage--; histRender(); }
+  };
+  $("hist-next").onclick = function () {
+    var pages = Math.max(1, Math.ceil(histItems.length / HIST_PAGE_SIZE));
+    if (histPage < pages - 1) { histPage++; histRender(); }
+  };
 }
 
 /* 快速连点工作区时并发请求会交错：序号令牌保证只有最新一次 refresh 落盘渲染。 */
@@ -908,7 +939,7 @@ async function refresh() {
   var res = await Promise.all([
     invoke("ws_locale", { wsId: ws }),
     invoke("pipeline_status", { wsId: ws }),
-    invoke("history_tail", { wsId: ws, n: 50 })
+    invoke("history_tail", { wsId: ws, n: 200 })
   ]);
   if (seq !== refreshSeq || ws !== selected) { return; }
   var loc = res[0], st = res[1], events = res[2];
