@@ -6,3 +6,21 @@ server:
 spring:
   application:
     name: {{project_name}}
+  # 模型超时：作用于 Spring AI 自动配置的 RestClient（OpenAI-compatible 调用）
+  http:
+    client:
+      connect-timeout: 10s
+      read-timeout: 30s
+  ai:
+    retry:
+      # 模型不可用时快速失败给兜底话术，绝不让请求线程重试拖满超时
+      max-attempts: 1
+    openai:
+      # base-url 不带 /v1：Spring AI 1.1.x 默认补全 /v1/chat/completions
+      # 例：DeepSeek 填 https://api.deepseek.com；自部署网关填其根地址
+      base-url: ${IW_MODEL_BASE_URL:https://api.openai.com}
+      api-key: ${IW_MODEL_API_KEY:not-configured}
+      chat:
+        options:
+          model: ${IW_MODEL_NAME:gpt-4o-mini}
+          temperature: 0

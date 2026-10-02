@@ -66,7 +66,7 @@ const JAVA: &[Framework] = &[
         stars: "9.5k",
         pros: "Spring 官方，ToolCallingAdvisor 统一工具执行，MCP 原生，适配 JDK 21 虚拟线程",
         cons: "2.x 迭代快，部分 starter 仍处里程碑版",
-        integration: Integration::Planned,
+        integration: Integration::Implemented,
     },
     Framework {
         name: "langchain4j",

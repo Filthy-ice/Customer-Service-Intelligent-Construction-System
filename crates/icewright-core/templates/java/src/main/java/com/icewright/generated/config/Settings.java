@@ -4,6 +4,9 @@ package com.icewright.generated.config;
 /**
  * 配置入口：全部来自环境变量，禁止在代码中出现任何密钥字面量。
  *
+ * <p>模型三项（IW_MODEL_BASE_URL / IW_MODEL_NAME / IW_MODEL_API_KEY）不在此读取，
+ * 由 application.yml 绑定给 Spring AI 自动配置。</p>
+ *
  * @author IceWright builder
  */
 public final class Settings {
@@ -14,10 +17,6 @@ public final class Settings {
     public static final String REDIS_HOST = env("IW_REDIS_HOST", "127.0.0.1");
     public static final int REDIS_PORT = Integer.parseInt(env("IW_REDIS_PORT", "6379"));
     public static final String REDIS_PASSWORD = env("IW_REDIS_PASSWORD", "");
-
-    public static final String MODEL_BASE_URL = env("IW_MODEL_BASE_URL", "");
-    public static final String MODEL_NAME = env("IW_MODEL_NAME", "");
-    public static final String MODEL_API_KEY = env("IW_MODEL_API_KEY", "");
 
     public static final String CORE_MODE = env("IW_CORE_MODE", "mock");
     public static final String MYSQL_HOST = env("IW_MYSQL_HOST", "127.0.0.1");
