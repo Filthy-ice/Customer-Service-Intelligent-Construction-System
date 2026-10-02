@@ -10,6 +10,8 @@ import (
 var (
 	Project = "{{project_name}}"
 	PackRef = "{{pack_ref}}"
+	// BusinessConsole 是业务人员后台页开关（闸门A 设计项，编译期写入；调试页与开发后台始终必含）。
+	BusinessConsole = "{{business_console}}" == "true"
 
 	RedisHost     = envOr("IW_REDIS_HOST", "127.0.0.1")
 	RedisPort     = envInt("IW_REDIS_PORT", 6379)

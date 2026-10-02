@@ -35,15 +35,20 @@ func writeError(w http.ResponseWriter, detail string) {
 	writeJSON(w, http.StatusBadRequest, map[string]string{"detail": detail})
 }
 
-// Handlers 聚合三条路由：GET /、GET /healthz、POST /chat。
+// Handlers 聚合页面矩阵与只读查询路由：GET /、/admin、/admin/overview、
+// /sessions/{id}、/healthz、POST /chat；/console 与 /console/sessions 按开关守卫。
 type Handlers struct {
-	chat      *service.ChatService
-	sessions  *service.SessionService
-	indexHTML func(w http.ResponseWriter, r *http.Request)
+	chat        *service.ChatService
+	sessions    *service.SessionService
+	indexHTML   func(w http.ResponseWriter, r *http.Request)
+	adminHTML   []byte
+	consoleHTML []byte
 }
 
-func NewHandlers(chat *service.ChatService, sessions *service.SessionService, indexHTML func(http.ResponseWriter, *http.Request)) *Handlers {
-	return &Handlers{chat: chat, sessions: sessions, indexHTML: indexHTML}
+func NewHandlers(chat *service.ChatService, sessions *service.SessionService,
+	indexHTML func(http.ResponseWriter, *http.Request), adminHTML, consoleHTML []byte) *Handlers {
+	return &Handlers{chat: chat, sessions: sessions, indexHTML: indexHTML,
+		adminHTML: adminHTML, consoleHTML: consoleHTML}
 }
 
 func (h *Handlers) Chat(w http.ResponseWriter, r *http.Request) {
@@ -95,4 +100,116 @@ func (h *Handlers) Home(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.indexHTML(w, r)
+}
+
+func writeHTML(w http.ResponseWriter, page []byte) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write(page)
+}
+
+// Admin 开发后台页（必含，只读）。
+func (h *Handlers) Admin(w http.ResponseWriter, r *http.Request) {
+	writeHTML(w, h.adminHTML)
+}
+
+// Console 业务人员后台页：开关未开启时 404，与 python/java 栈一致。
+func (h *Handlers) Console(w http.ResponseWriter, r *http.Request) {
+	if !config.BusinessConsole {
+		writeJSON(w, http.StatusNotFound, map[string]string{"detail": "业务后台未开启"})
+		return
+	}
+	writeHTML(w, h.consoleHTML)
+}
+
+// SessionDetail GET /sessions/{id}：调试页槽位回显，只读 Redis 易失状态。
+func (h *Handlers) SessionDetail(w http.ResponseWriter, r *http.Request) {
+	sessionID := strings.TrimPrefix(r.URL.Path, "/sessions/")
+	if sessionID == "" || sessionID == r.URL.Path {
+		writeError(w, "路径应为 /sessions/{session_id}")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"session_id": sessionID,
+		"slots":      h.sessions.LoadSlots(sessionID),
+	})
+}
+
+type adminOverviewBody struct {
+	Project         string               `json:"project"`
+	PackRef         string               `json:"pack_ref"`
+	Redis           string               `json:"redis"`
+	Languages       []string             `json:"languages"`
+	ModelConfigured bool                 `json:"model_configured"`
+	CoreMode        string               `json:"core_mode"`
+	BusinessConsole bool                 `json:"business_console"`
+	Rules           []domain.Rule        `json:"rules"`
+	Skills          []domain.Skill       `json:"skills"`
+	APIs            []domain.APIContract `json:"apis"`
+}
+
+// AdminOverview 开发后台总览：运行态 + 规则/技能/接口契约（编译进项目的数据文件）。
+func (h *Handlers) AdminOverview(w http.ResponseWriter, r *http.Request) {
+	rules, err := domain.LoadRules()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"detail": err.Error()})
+		return
+	}
+	skills, err := domain.LoadSkills()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"detail": err.Error()})
+		return
+	}
+	apis, err := domain.LoadAPIs()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"detail": err.Error()})
+		return
+	}
+	if rules == nil {
+		rules = []domain.Rule{}
+	}
+	if skills == nil {
+		skills = []domain.Skill{}
+	}
+	if apis == nil {
+		apis = []domain.APIContract{}
+	}
+	writeJSON(w, http.StatusOK, adminOverviewBody{
+		Project:         config.Project,
+		PackRef:         config.PackRef,
+		Redis:           h.sessions.RedisPing(),
+		Languages:       domain.Languages(),
+		ModelConfigured: config.ModelBaseURL != "" && config.ModelName != "" && config.ModelAPIKey != "",
+		CoreMode:        config.CoreMode,
+		BusinessConsole: config.BusinessConsole,
+		Rules:           rules,
+		Skills:          skills,
+		APIs:            apis,
+	})
+}
+
+type consoleSessionRow struct {
+	SessionID string `json:"session_id"`
+	Flagged   string `json:"flagged"`
+	Turns     any    `json:"turns"`
+}
+
+// ConsoleSessions 业务后台待关注会话列表：仅规则打标的会话。
+func (h *Handlers) ConsoleSessions(w http.ResponseWriter, r *http.Request) {
+	if !config.BusinessConsole {
+		writeJSON(w, http.StatusNotFound, map[string]string{"detail": "业务后台未开启"})
+		return
+	}
+	rows := make([]consoleSessionRow, 0)
+	for _, item := range h.sessions.ListSessions() {
+		flagged, _ := item.Slots["flagged"].(string)
+		if flagged == "" {
+			continue
+		}
+		turns := item.Slots["turns"]
+		if turns == nil {
+			turns = 0
+		}
+		rows = append(rows, consoleSessionRow{SessionID: item.SessionID, Flagged: flagged, Turns: turns})
+	}
+	writeJSON(w, http.StatusOK, rows)
 }

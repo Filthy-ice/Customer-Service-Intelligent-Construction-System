@@ -11,7 +11,7 @@ import (
 	"icewright.local/{{artifact_id}}/web"
 )
 
-//go:embed static/index.html
+//go:embed static/index.html static/admin.html static/console.html
 var staticFS embed.FS
 
 const listenAddr = ":8000"
@@ -21,6 +21,14 @@ func main() {
 	if err != nil {
 		log.Fatalf("静态页面缺失: %v", err)
 	}
+	admin, err := fs.ReadFile(staticFS, "static/admin.html")
+	if err != nil {
+		log.Fatalf("开发后台页缺失: %v", err)
+	}
+	console, err := fs.ReadFile(staticFS, "static/console.html")
+	if err != nil {
+		log.Fatalf("业务后台页缺失: %v", err)
+	}
 	sessions := service.NewSessionService()
 	chat, err := service.NewChatService(sessions)
 	if err != nil {
@@ -29,11 +37,16 @@ func main() {
 	handlers := web.NewHandlers(chat, sessions, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write(index)
-	})
+	}, admin, console)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/chat", handlers.Chat)
 	mux.HandleFunc("/healthz", handlers.Healthz)
+	mux.HandleFunc("/admin", handlers.Admin)
+	mux.HandleFunc("/admin/overview", handlers.AdminOverview)
+	mux.HandleFunc("/console", handlers.Console)
+	mux.HandleFunc("/console/sessions", handlers.ConsoleSessions)
+	mux.HandleFunc("/sessions/", handlers.SessionDetail)
 	mux.HandleFunc("/", handlers.Home)
 
 	log.Printf("listening on %s", listenAddr)

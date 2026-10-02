@@ -114,6 +114,10 @@ func (c *ChatService) Answer(sessionID, message, language string) Answer {
 		if id != "" {
 			reply = domain.T(replyKey, lang, map[string]string{"rule": id})
 		}
+		if id != "" {
+			// 短路命中的会话打标，供业务后台 /console 列出待人工关注（只标规则 id，不存业务数据）
+			_, _ = c.sessions.MergeSlots(sessionID, map[string]any{"flagged": id})
+		}
 		return Answer{SessionID: sessionID, Reply: reply, MatchedRules: matchedIDs, Language: lang}
 	}
 

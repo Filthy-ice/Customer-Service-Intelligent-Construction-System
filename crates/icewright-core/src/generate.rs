@@ -268,6 +268,10 @@ static TEMPLATES_GO: &[(&str, &str)] = &[
         include_str!("../templates/go/domain/skills.go"),
     ),
     (
+        "domain/apis.go",
+        include_str!("../templates/go/domain/apis.go"),
+    ),
+    (
         "domain/skills_test.go",
         include_str!("../templates/go/domain/skills_test.go"),
     ),
@@ -294,6 +298,14 @@ static TEMPLATES_GO: &[(&str, &str)] = &[
     (
         "static/index.html",
         include_str!("../templates/go/static/index.html"),
+    ),
+    (
+        "static/admin.html",
+        include_str!("../templates/go/static/admin.html"),
+    ),
+    (
+        "static/console.html",
+        include_str!("../templates/go/static/console.html"),
     ),
 ];
 

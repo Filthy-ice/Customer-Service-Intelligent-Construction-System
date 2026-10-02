@@ -9,8 +9,12 @@ set -a; . ./.env; set +a      # 导出 IW_* 环境变量
 go run .                      # 默认监听 8000 端口
 
 # 冒烟对话：
-# 浏览器打开 http://127.0.0.1:8000/ 即为聊天页面（右上角可切换 中文/English，
-# 所选语言随请求提交，固定话术与模型回复均使用该语言；线格式与 python/java 栈一致）。
+# 浏览器打开 http://127.0.0.1:8000/ 即为开发调试聊天页（右上角可切换 中文/English，
+# 所选语言随请求提交，固定话术与模型回复均使用该语言；每条回复下回显命中规则与会话槽位；
+# 线格式与 python/java 栈一致）。
+# http://127.0.0.1:8000/admin 为开发后台（只读规则/技能/接口契约与运行态，不落业务数据）。
+# 若闸门A 设计开启了业务后台（workspace.business_console），还有 http://127.0.0.1:8000/console
+# 业务人员后台：列出命中拦截/转人工/禁语规则的待关注会话。
 curl -X POST localhost:8000/chat -H 'content-type: application/json' \
   -d '{"session_id":"s1","message":"我的案子CLM-0001材料齐了吗","language":"zh"}'
 curl -X POST localhost:8000/chat -H 'content-type: application/json' \

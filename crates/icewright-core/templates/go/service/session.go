@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -16,6 +17,7 @@ import (
 
 const slotsTTL = 3600 * time.Second
 const dialTimeout = 3 * time.Second
+const scanCount = 100
 
 // SessionService 封装会话槽位的读写与合并。
 type SessionService struct {
@@ -81,4 +83,33 @@ func (s *SessionService) MergeSlots(sessionID string, patch map[string]any) (dom
 		return nil, err
 	}
 	return slots, nil
+}
+
+// SessionRow 是一行会话槽位快照（供业务后台列表；只含易失状态，不含业务数据）。
+type SessionRow struct {
+	SessionID string      `json:"session_id"`
+	Slots     domain.Fact `json:"slots"`
+}
+
+// ListSessions 枚举本项目全部会话（SCAN 非 KEYS，不阻塞 Redis）；只读。
+func (s *SessionService) ListSessions() []SessionRow {
+	ctx, cancel := context.WithTimeout(context.Background(), dialTimeout)
+	defer cancel()
+	prefix := fmt.Sprintf("iw:%s:", config.Project)
+	var out []SessionRow
+	var cursor uint64
+	for {
+		keys, next, err := s.rdb.Scan(ctx, cursor, prefix+"*", scanCount).Result()
+		if err != nil {
+			return out
+		}
+		for _, key := range keys {
+			sessionID := strings.TrimPrefix(key, prefix)
+			out = append(out, SessionRow{SessionID: sessionID, Slots: s.LoadSlots(sessionID)})
+		}
+		if next == 0 {
+			return out
+		}
+		cursor = next
+	}
 }

@@ -5,5 +5,5 @@ import "embed"
 
 // FS 把 IceWright 编译进项目的领域产物打进二进制（与 java jar / python data 目录等价）。
 //
-//go:embed rules.json skills.json
+//go:embed rules.json skills.json apis.json
 var FS embed.FS
