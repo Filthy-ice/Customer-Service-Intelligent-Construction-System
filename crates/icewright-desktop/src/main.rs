@@ -397,9 +397,38 @@ fn set_menu_lang(app: tauri::AppHandle, lang: String) -> Result<(), String> {
     apply_menu(&app)
 }
 
+/// GNOME 深浅色的系统真值（color-scheme 键）：auto 档以此为准，
+/// 避免 App 本地 set_theme 强制后污染 webview 的 prefers-color-scheme 读数。
+/// 非 GNOME/读不到时返回 None，由前端 matchMedia 读数兜底。
+#[cfg(target_os = "linux")]
+fn gnome_prefers_dark() -> Option<bool> {
+    let out = std::process::Command::new("gsettings")
+        .args(["get", "org.gnome.desktop.interface", "color-scheme"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if v.contains("prefer-dark") {
+        Some(true)
+    } else if v.contains("default") || v.contains("prefer-light") {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn gnome_prefers_dark() -> Option<bool> {
+    None
+}
+
 /// 同步 语言/主题 偏好（0/1/2），刷新菜单栏勾选态。
+/// sys_dark：前端 matchMedia 解析出的系统深浅色——auto 档时原生菜单/标题栏要跟它走，
+/// 页面 CSS 自己会跟随系统，但 GTK 原生部件只认 set_theme（Linux 上切 :dark 主题变体）。
 #[tauri::command]
-fn sync_prefs(app: tauri::AppHandle, lang: u8, theme: u8) -> Result<(), String> {
+fn sync_prefs(app: tauri::AppHandle, lang: u8, theme: u8, sys_dark: bool) -> Result<(), String> {
     if lang > 2 {
         return Err(format!("未知语言偏好: {lang}"));
     }
@@ -408,6 +437,21 @@ fn sync_prefs(app: tauri::AppHandle, lang: u8, theme: u8) -> Result<(), String> 
     }
     LANG_PREF.store(lang, Ordering::Relaxed);
     THEME_PREF.store(theme, Ordering::Relaxed);
+    let chrome = match theme {
+        1 => tauri::utils::Theme::Light,
+        2 => tauri::utils::Theme::Dark,
+        _ => {
+            let dark = gnome_prefers_dark().unwrap_or(sys_dark);
+            if dark {
+                tauri::utils::Theme::Dark
+            } else {
+                tauri::utils::Theme::Light
+            }
+        }
+    };
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.set_theme(Some(chrome));
+    }
     apply_menu(&app)
 }
 

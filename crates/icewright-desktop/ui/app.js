@@ -234,8 +234,10 @@ function pushMenuLang(l) {
 // 把 语言/主题 偏好同步给原生菜单栏，勾选项才能反映当前生效值。
 function langIdx() { return langPref === null ? 0 : (langPref === "en" ? 2 : 1); }
 function themeIdx() { return themePref === "light" ? 1 : (themePref === "dark" ? 2 : 0); }
+// 系统深浅色的实时探针：auto 档时原生菜单/标题栏要跟着它走（webview 里 CSS 已自动跟随）。
+var sysDarkMq = window.matchMedia("(prefers-color-scheme: dark)");
 function syncPrefs() {
-  try { invoke("sync_prefs", { lang: langIdx(), theme: themeIdx() }).catch(function () {}); } catch (e) { /* 非 Tauri 环境 */ }
+  try { invoke("sync_prefs", { lang: langIdx(), theme: themeIdx(), sysDark: sysDarkMq.matches }).catch(function () {}); } catch (e) { /* 非 Tauri 环境 */ }
 }
 function syncLang(l) {
   lang = l;
@@ -285,6 +287,10 @@ function setTheme(t) {
   syncPrefs();
 }
 applyTheme();
+// 系统深浅色中途变化：CSS 会自动重绘页面，但 auto 档下要再把原生菜单/标题栏拨过去。
+try {
+  sysDarkMq.addEventListener("change", function () { if (themePref === "auto") { syncPrefs(); } });
+} catch (e) { /* 老引擎不支持 addEventListener 时忽略 */ }
 
 var selected = null;
 var $ = function (id) { return document.getElementById(id); };
