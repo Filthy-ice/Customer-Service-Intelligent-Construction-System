@@ -9,6 +9,7 @@ pack = ""          # 行业包引用，如 insurance/auto-claim@0.1.0
 stack = "python"   # python | java | go（三栈线格式一致，S6 按栈分派验证）
 locale = "zh"      # CLI 文案语言：zh | en（临时覆盖用环境变量 ICERIGHT_LOCALE）
 #agent_framework = ""  # 覆盖生成物 agent 框架默认选型（留空用每栈默认；见设计文档候选表）
+#business_console = false  # 生成物附带业务人员后台页 /console（调试页与开发后台始终必含）
 
 [model]
 base_url = ""      # OpenAI-compatible 端点；`icewright model use <ws> <provider>` 从目录自动填

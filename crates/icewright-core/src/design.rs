@@ -42,6 +42,14 @@ pub fn render_design(ws: &Workspace) -> Result<String> {
     out.push_str(&format!("- 目标栈：{}\n", cfg.workspace.stack));
     out.push_str("- 前端语言：zh / en（生成项目自带聊天页面，访客可切换；未知语言回退 zh）\n");
     out.push_str(&format!(
+        "- 页面矩阵：/ 开发调试聊天页（必含，含规则命中与会话槽位回显）、/admin 开发后台（必含，只读规则/技能/接口契约/运行态，不落业务数据）、/console 业务人员后台（{}）\n",
+        if cfg.workspace.business_console {
+            "已开启：workspace.business_console=true"
+        } else {
+            "未开启（默认）；需要业务后台请 `icewright config set <ws> workspace.business_console true` 后重新渲染"
+        }
+    ));
+    out.push_str(&format!(
         "- 模型：{} @ {}（密钥引用：{}）\n",
         nv(&cfg.model.model),
         mask_endpoint(&cfg.model.base_url),
@@ -574,6 +582,11 @@ mod tests {
         let md = render_design(&ws).unwrap();
         assert!(!md.contains("尚未人工确认"));
         assert!(!md.contains("⚠status="));
+        assert!(md.contains("页面矩阵"), "设计文档应含页面矩阵章节");
+        assert!(
+            md.contains("未开启（默认）"),
+            "业务后台默认关闭应在设计文档中如实呈现"
+        );
         let _ = std::fs::remove_dir_all(&base);
     }
 

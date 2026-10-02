@@ -76,6 +76,9 @@ def answer(session_id: str, message: str, language: str = "zh") -> dict:
 
     def done(reply_key: str, rule_id: str = "") -> dict:
         reply = i18n.t(reply_key, lang, rule=rule_id) if rule_id else i18n.t(reply_key, lang)
+        # 短路命中的会话打标，供业务后台 /console 列出待人工关注（只标规则 id，不存业务数据）
+        if rule_id:
+            session_service.merge_slots(session_id, {"flagged": rule_id})
         return {
             "session_id": session_id,
             "reply": reply,

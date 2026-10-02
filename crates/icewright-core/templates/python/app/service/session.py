@@ -51,3 +51,14 @@ def merge_slots(session_id: str, patch: dict) -> dict:
     slots.update(patch)
     save_slots(session_id, slots)
     return slots
+
+
+def list_sessions() -> list[dict]:
+    """枚举本项目全部会话槽位（scan 非 keys，不阻塞 Redis）；只读，不落业务数据。"""
+    prefix = "iw:%s:" % settings.project
+    client = _client()
+    out = []
+    for key in client.scan_iter(match=prefix + "*"):
+        session_id = key[len(prefix):]
+        out.append({"session_id": session_id, "slots": load_slots(session_id)})
+    return out

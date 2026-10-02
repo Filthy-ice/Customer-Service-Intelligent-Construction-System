@@ -15,6 +15,9 @@ const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// go 栈 embed 编译要求 skills.json 恒存在时的默认空表。
 const DEFAULT_SKILLS_JSON: &str = "{\"skills\": []}\n";
 
+/// go 栈 embed 编译要求 apis.json 恒存在时的默认空表。
+const DEFAULT_APIS_JSON: &str = "{\"apis\": []}\n";
+
 /// 目标栈为 python 时的骨架模板（目录结构遵循 docs-internal/12 的阿里 Python 分层）。
 static TEMPLATES_PY: &[(&str, &str)] = &[
     (
@@ -82,6 +85,14 @@ static TEMPLATES_PY: &[(&str, &str)] = &[
     (
         "static/chat.html",
         include_str!("../templates/python/static/chat.html"),
+    ),
+    (
+        "static/admin.html",
+        include_str!("../templates/python/static/admin.html"),
+    ),
+    (
+        "static/console.html",
+        include_str!("../templates/python/static/console.html"),
     ),
     (
         "app/integration/__init__.py",
@@ -290,6 +301,7 @@ struct Slots {
     pack_ref: String,
     engine_version: String,
     artifact_id: String,
+    business_console: String,
 }
 
 /// 渲染槽位；若仍残留 `{{`，说明模板/槽位表不同步——宁可失败不可写出半截占位符。
@@ -298,7 +310,8 @@ fn render(tpl: &str, rel: &str, slots: &Slots) -> Result<String> {
         .replace("{{project_name}}", &slots.project_name)
         .replace("{{pack_ref}}", &slots.pack_ref)
         .replace("{{engine_version}}", &slots.engine_version)
-        .replace("{{artifact_id}}", &slots.artifact_id);
+        .replace("{{artifact_id}}", &slots.artifact_id)
+        .replace("{{business_console}}", &slots.business_console);
     if let Some(pos) = out.find("{{") {
         let around = &out[pos..out.len().min(pos + 40)];
         bail!("模板 {rel} 含未定义槽位: {around:?}");
@@ -373,8 +386,9 @@ pub fn generate(ws: &Workspace, out_dir: &Path) -> Result<GenerateReport> {
 
     // 契约硬闸：接口存在性须由客户技术侧逐条确认后才可进 S5（模型一律输出 false）
     let apis_path = ws.artifact_path(crate::extract::APIS_ARTIFACT);
-    if apis_path.exists() {
-        let apis: Value = serde_json::from_str(&std::fs::read_to_string(&apis_path)?)?;
+    let apis_raw: Option<String> = if apis_path.exists() {
+        let raw = std::fs::read_to_string(&apis_path)?;
+        let apis: Value = serde_json::from_str(&raw)?;
         let unconfirmed: Vec<&str> = apis["apis"]
             .as_array()
             .map(|a| {
@@ -390,7 +404,10 @@ pub fn generate(ws: &Workspace, out_dir: &Path) -> Result<GenerateReport> {
                 unconfirmed.join(", ")
             );
         }
-    }
+        Some(raw)
+    } else {
+        None
+    };
 
     let cfg = ws.config()?;
     // 生成适配器按栈分目标实现；未实现的栈必须拒绝，绝不把 python 骨架冒充 java/go 交付。
@@ -443,6 +460,7 @@ pub fn generate(ws: &Workspace, out_dir: &Path) -> Result<GenerateReport> {
         project_name: cfg.workspace.name.clone(),
         pack_ref,
         engine_version: ENGINE_VERSION.to_string(),
+        business_console: cfg.workspace.business_console.to_string(),
     };
 
     /// 一轮生成的累积结果：分类 diff、哈希材料、引擎管理文件清单。
@@ -549,6 +567,19 @@ pub fn generate(ws: &Workspace, out_dir: &Path) -> Result<GenerateReport> {
             out_dir,
             format!("{data_rel}/skills.json"),
             skills_effective.to_string(),
+        )?;
+    }
+    // 接口契约快照同样落盘，供生成物开发后台只读展示（go embed 要求物理存在）
+    let apis_effective: &str = match &apis_raw {
+        Some(raw) => raw,
+        None if cfg.workspace.stack == "go" => DEFAULT_APIS_JSON,
+        None => "",
+    };
+    if !apis_effective.is_empty() {
+        o.place(
+            out_dir,
+            format!("{data_rel}/apis.json"),
+            apis_effective.to_string(),
         )?;
     }
     // 上一轮引擎管理、本轮不再产出的文件：只报告，不删除（用户可能已挪作他用）
@@ -927,8 +958,12 @@ mod tests {
         let report = generate(&ws, &out).unwrap();
         assert_eq!(
             report.written.len(),
-            TEMPLATES_GO.len() + 2,
-            "模板 + rules.json + 默认 skills.json"
+            TEMPLATES_GO.len() + 3,
+            "模板 + rules.json + 默认 skills.json + 默认 apis.json"
+        );
+        assert!(
+            out.join("assets/apis.json").exists(),
+            "go 栈 embed 编译要求 apis.json 恒存在"
         );
         assert!(
             !out.join("app/main.py").exists(),
@@ -962,6 +997,47 @@ mod tests {
         let report2 = generate(&ws, &out).unwrap();
         assert!(report2.preserved.is_empty(), "{:?}", report2.preserved);
         assert_eq!(report.output_hash, report2.output_hash);
+    }
+
+    #[test]
+    fn page_matrix_renders_with_console_flag() {
+        let ws = setup("pagematrix");
+        let out = ws.root.join("output");
+        generate(&ws, &out).unwrap();
+        assert!(
+            out.join("static/admin.html").exists(),
+            "开发后台页必须始终生成"
+        );
+        assert!(
+            out.join("static/console.html").exists(),
+            "业务后台页文件始终生成，路由层按开关守卫"
+        );
+        let settings = std::fs::read_to_string(out.join("app/config/settings.py")).unwrap();
+        assert!(
+            settings.contains("business_console: bool = \"false\" == \"true\""),
+            "默认关闭业务后台"
+        );
+        assert!(
+            std::fs::read_to_string(out.join("static/chat.html"))
+                .unwrap()
+                .contains("/sessions/"),
+            "调试页应带槽位回显"
+        );
+
+        let ws2 = setup("pagematrixon");
+        let cfg_path = ws2.root.join("icewright.toml");
+        let raw = std::fs::read_to_string(&cfg_path).unwrap().replace(
+            "stack = \"python\"",
+            "stack = \"python\"\nbusiness_console = true",
+        );
+        std::fs::write(&cfg_path, raw).unwrap();
+        let out2 = ws2.root.join("output");
+        generate(&ws2, &out2).unwrap();
+        let settings2 = std::fs::read_to_string(out2.join("app/config/settings.py")).unwrap();
+        assert!(
+            settings2.contains("business_console: bool = \"true\" == \"true\""),
+            "开启后应渲染为 true"
+        );
     }
 
     #[test]

@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 class Settings:
     project: str = "{{project_name}}"
     pack_ref: str = "{{pack_ref}}"
+    # 业务人员后台页开关（闸门A 设计项，编译期写入；调试页与开发后台始终必含）
+    business_console: bool = "{{business_console}}" == "true"
 
     redis_host: str = field(default_factory=lambda: os.getenv("IW_REDIS_HOST", "127.0.0.1"))
     redis_port: int = field(default_factory=lambda: int(os.getenv("IW_REDIS_PORT", "6379")))
