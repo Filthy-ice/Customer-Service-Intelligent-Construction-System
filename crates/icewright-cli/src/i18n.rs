@@ -23,7 +23,7 @@ pub fn is_en() -> bool {
 
 const MESSAGES: &[(&str, &str, &str)] = &[
     ("ws_created", "已创建 workspace: {path}", "Workspace created: {path}"),
-    ("ws_next", "下一步：编辑 icewright.toml 配置模型与行业包，需求文档放入 corpus/", "Next: edit icewright.toml to configure the model and industry pack, and put requirement docs into corpus/"),
+    ("ws_next", "下一步：编辑 icewright.toml 配置模型与行业包，需求文档按分类放入 corpus/{apis|flows|dictionary|rules|skills|other}/（约定见 corpus/README.md）", "Next: edit icewright.toml to configure the model and industry pack, and place requirement docs into corpus/{apis|flows|dictionary|rules|skills|other}/ per the corpus/README.md conventions"),
     ("ws_none", "（无 workspace，用 `icewright ws new <id>` 创建）", "(no workspaces — create one with `icewright ws new <id>`)"),
     ("pipeline_exists", "pipeline 已存在: {path}（重跑请先归档到 pipeline/history/）", "pipeline already exists: {path} (archive it to pipeline/history/ before rerunning)"),
     ("pipeline_inited", "已初始化 {run}（{path}）", "Initialized {run} ({path})"),
