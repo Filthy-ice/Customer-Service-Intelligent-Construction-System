@@ -11,7 +11,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "IceWright 构建监控",
+        "title": "IceWright Desktop",
         "width": 1080,
         "height": 720,
         "resizable": true
@@ -23,16 +23,17 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["deb"],
+    "targets": "all",
     "publisher": "Filthy-Ice",
     "category": "Development",
-    "shortDescription": "IceWright 构建器桌面端",
-    "longDescription": "IceWright 桌面客户端：S1–S8 流水线实时监控、生成历史回看与窗口内推进操作。",
+    "shortDescription": "IceWright builder desktop client / IceWright 构建器桌面端",
+    "longDescription": "IceWright 桌面客户端：S1–S8 流水线实时监控、生成历史回看与窗口内推进操作。 Desktop client for the IceWright pipeline: live S1-S8 monitoring, build history, and in-window operations.",
     "icon": [
       "icons/16x16.png",
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
+      "icons/icon.icns",
       "icons/icon.ico"
     ]
   }

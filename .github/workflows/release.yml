@@ -1,26 +1,42 @@
 name: release
-# 打 v* 标签即构建桌面端 deb 并挂到 GitHub Release（草稿默认关闭，直接发布）。
+# 打 v* 标签：全平台矩阵构建桌面端安装包并发布到 GitHub Release。
+# push 到 release-matrix 分支 / 手动 dispatch：只构建验证，不发 Release。
 on:
   push:
     tags: ["v*"]
+    branches: [release-matrix]
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  desktop-linux:
-    runs-on: ubuntu-22.04
+  desktop:
     permissions:
       contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            bundles: deb,rpm,appimage
+          - os: windows-latest
+            bundles: msi,nsis
+          - os: macos-latest
+            bundles: dmg
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: install tauri system deps
-        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev librsvg2-dev libxdo-dev libssl-dev
-      - name: build & bundle deb
+      - name: install linux system deps
+        if: runner.os == 'Linux'
+        run: >
+          sudo apt-get update && sudo apt-get install -y
+          libwebkit2gtk-4.1-dev librsvg2-dev libxdo-dev libssl-dev rpm libfuse2
+      - name: build & bundle
         uses: tauri-apps/tauri-action@v0
         with:
           projectPath: crates/icewright-desktop
-          args: --bundles deb
+          args: --bundles ${{ matrix.bundles }}
           includeDraft: false
