@@ -1908,6 +1908,8 @@ dependencies = [
 name = "icewright-desktop"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "chrono",
  "icewright-core",
  "serde_json",
  "tauri",

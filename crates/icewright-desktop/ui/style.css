@@ -39,3 +39,16 @@ h3 { margin: 12px 0 8px; font-size: 14px; }
 #history .ts { font-family: monospace; opacity: .7; flex: none; }
 #history .stage { font-weight: 600; flex: none; width: 56px; color: var(--accent); }
 #history .detail { white-space: pre-wrap; }
+.actions { margin: 0 0 12px; display: flex; flex-direction: column; gap: 8px; }
+.actions input { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px;
+  font-family: inherit; font-size: 13px; max-width: 420px; }
+.actions input:disabled { opacity: .5; }
+#op-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+#op-buttons button { padding: 5px 12px; border: 1px solid var(--line);
+  border-radius: 6px; background: #fff; font-family: inherit; font-size: 12.5px; cursor: pointer; }
+#op-buttons button:disabled { opacity: .4; cursor: default; }
+#op-buttons button.confirm { border-color: #16a34a; color: #16a34a; }
+#op-buttons button.danger { border-color: #dc2626; color: #dc2626; }
+#op-buttons button.arm { background: #fff3cd; border-color: #b58900; color: #7a5c00; font-weight: 600; }
+.op-result { background: #101418; color: #d6e2ec; padding: 10px 12px; border-radius: 8px;
+  font-size: 12px; white-space: pre-wrap; word-break: break-all; max-height: 220px; overflow: auto; }

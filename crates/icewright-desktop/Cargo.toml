@@ -9,6 +9,8 @@ repository.workspace = true
 [dependencies]
 icewright-core = { path = "../icewright-core" }
 tauri = { version = "2", features = [] }
+anyhow = { workspace = true }
+chrono = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }

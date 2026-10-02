@@ -42,7 +42,7 @@ async function loadWorkspaces() {
 
 function renderStatus(st) {
   if (!st) {
-    $("run-meta").textContent = "尚未初始化 pipeline（运行 icewright pipeline init 或 build）";
+    $("run-meta").textContent = "尚未初始化 pipeline：点下方「初始化」或运行 icewright pipeline init";
     $("stepper").innerHTML = "";
     $("stage-rows").innerHTML = "";
     return;
@@ -73,6 +73,103 @@ function renderStatus(st) {
       "<td><code>" + shortHash(s.output_hash) + "</code></td>" +
       "<td>" + esc(gate) + "</td>";
     rows.appendChild(tr);
+  });
+}
+
+/* ---------- 窗口内推进操作 ---------- */
+// 按钮可用性只按状态机粗粒度门控；最终裁决在引擎（错误会显示在结果面板）。
+var OPS = [
+  { op: "init", label: "初始化", need: function (st) { return !st; } },
+  { op: "preflight", label: "环境预检", need: function (st) { return !!st; } },
+  { op: "design_render", label: "渲染设计", need: function (st) { return statusOf(st, "S3") === "approved"; } },
+  { op: "design_approve", label: "批准闸门A", confirm: true, need: function (st) { return statusOf(st, "S4") === "waiting_gate"; } },
+  { op: "design_reject", label: "驳回闸门A", note: true, need: function (st) { return statusOf(st, "S4") === "waiting_gate"; } },
+  { op: "generate", label: "生成代码", need: function (st) { return statusOf(st, "S4") === "approved"; } },
+  { op: "verify", label: "自动验证", need: function (st) { return statusOf(st, "S5") === "approved"; } },
+  { op: "delivery_render", label: "渲染交付", need: function (st) { return statusOf(st, "S6") === "approved"; } },
+  { op: "delivery_approve", label: "批准闸门B", confirm: true, need: function (st) { return statusOf(st, "S7") === "waiting_gate"; } },
+  { op: "delivery_reject", label: "驳回闸门B", note: true, need: function (st) { return statusOf(st, "S7") === "waiting_gate"; } },
+];
+
+var busy = false;
+var armedOp = null;   // 双击确认：第一次点击挂起，3 秒内再点才执行
+var armTimer = null;
+
+function statusOf(st, id) {
+  if (!st) { return null; }
+  var s = st.stages.find(function (x) { return x.id === id; });
+  return s ? s.status : null;
+}
+
+function renderActions(st) {
+  lastSt = st;
+  OPS.forEach(function (spec) {
+    var btn = $("btn-" + spec.op);
+    if (!btn) { return; }
+    var enabled = !busy && spec.need(st);
+    if (spec.note) { enabled = enabled && $("op-note").value.trim().length > 0; }
+    btn.disabled = !enabled;
+    btn.textContent = armedOp === spec.op ? "再点一次确认" : spec.label;
+    btn.classList.toggle("arm", armedOp === spec.op);
+  });
+  $("op-note").disabled = busy;
+}
+
+var lastSt = null;
+
+function disarm() {
+  armedOp = null;
+  if (armTimer) { clearTimeout(armTimer); armTimer = null; }
+  renderActions(lastSt);
+}
+
+async function currentStatus() {
+  return await invoke("pipeline_status", { wsId: selected });
+}
+
+async function runOp(spec) {
+  var st = await currentStatus();
+  if (spec.confirm) {
+    if (armedOp !== spec.op) {
+      armedOp = spec.op;
+      armTimer = setTimeout(disarm, 3000);
+      renderActions(st);
+      return;
+    }
+    disarm();
+  }
+  var note = $("op-note").value.trim();
+  busy = true;
+  renderActions(st);
+  var res = $("op-result");
+  res.classList.remove("hidden");
+  res.textContent = "⏳ " + spec.label + " 执行中…";
+  try {
+    var out = await invoke("run_op", {
+      op: spec.op, wsId: selected,
+      note: spec.note ? note : null,
+    });
+    res.textContent = "✔ " + spec.label + "\n" + out;
+    $("op-note").value = "";
+  } catch (err) {
+    res.textContent = "✘ " + spec.label + "\n" + err;
+  }
+  busy = false;
+  await refresh();
+}
+
+function initActions() {
+  var box = $("op-buttons");
+  OPS.forEach(function (spec) {
+    var b = document.createElement("button");
+    b.id = "btn-" + spec.op;
+    b.textContent = spec.label;
+    b.className = spec.confirm ? "confirm" : (spec.note ? "danger" : "");
+    b.onclick = function () { runOp(spec); };
+    box.appendChild(b);
+  });
+  $("op-note").addEventListener("input", async function () {
+    renderActions(await currentStatus());
   });
 }
 
@@ -108,6 +205,7 @@ async function refresh() {
   $("detail").classList.remove("hidden");
   $("ws-title").textContent = selected;
   renderStatus(st);
+  renderActions(st);
   await renderHistory();
 }
 
@@ -121,5 +219,6 @@ async function tick() {
 }
 
 invoke("app_version").then(function (v) { $("ver").textContent = "v" + v; });
+initActions();
 tick();
 setInterval(tick, 2000);
