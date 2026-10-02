@@ -1,4 +1,5 @@
 pub mod config;
+pub mod corpus;
 pub mod datasource;
 pub mod delivery;
 pub mod design;

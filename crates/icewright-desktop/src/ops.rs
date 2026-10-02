@@ -4,8 +4,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use chrono::Utc;
 use icewright_core::{
-    config, delivery, design, extract, generate, history, model, preflight, providers, secrets,
-    state, verify, workspace, Workspace,
+    config, corpus, delivery, design, extract, generate, history, model, preflight, providers,
+    secrets, state, verify, workspace, Workspace,
 };
 
 /// 同一时刻只允许一个推进操作，防止并发改写 state.json。
@@ -96,8 +96,8 @@ pub fn ws_create(ws_id: &str) -> Result<String, String> {
 
 /* ---------- 工作区文件读写：corpus/（S3 输入）与交付目录（S5 生成物）双向可编辑 ---------- */
 
-/// 语料分类子目录，与引擎 create_at 建出的目录一致；保存只允许落进这些子目录。
-pub const CORPUS_CATS: [&str; 6] = ["rules", "apis", "flows", "dictionary", "skills", "other"];
+/// 语料分类子目录，与引擎建目录/导入白名单同源，杜绝两处漂移。
+pub const CORPUS_CATS: [&str; 6] = corpus::CATS;
 const FILE_MAX_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Debug, serde::Serialize)]
@@ -239,6 +239,49 @@ pub fn corpus_read(ws_id: &str, rel: &str) -> Result<String, String> {
 pub fn corpus_save(ws_id: &str, rel: &str, content: &str) -> Result<String, String> {
     let rel = corpus_rel_checked(rel)?;
     write_file_under(&open(ws_id)?.root.join("corpus"), &rel, content)
+}
+
+/// 按路径导入客户语料的回报：分类落点 + 新增/相同/跳过计数（文案由前端 i18n 组装）。
+#[derive(Debug, serde::Serialize)]
+pub struct CorpusImportResult {
+    pub cat: String,
+    pub copied: Vec<String>,
+    pub identical: usize,
+    pub skipped_binary: usize,
+}
+
+/// 客户材料留在原处：文件/目录按路径拷进 corpus/<分类>/ 快照。
+/// 桌面端没有"当前目录"概念：裸相对路径按用户主目录解析（绝对与 ~/ 原样交给引擎）。
+pub fn corpus_import(ws_id: &str, path: &str, cat: &str) -> Result<CorpusImportResult, String> {
+    let ws = open(ws_id)?;
+    let raw = path.trim();
+    if raw.is_empty() {
+        return Err("empty_path".to_string());
+    }
+    let resolved = {
+        let p = std::path::Path::new(raw);
+        if p.is_absolute() || raw.starts_with('~') {
+            raw.to_string()
+        } else {
+            let home = std::env::var_os("HOME")
+                .or_else(|| std::env::var_os("USERPROFILE"))
+                .map(|h| std::path::PathBuf::from(h).join(raw).display().to_string());
+            home.unwrap_or_else(|| raw.to_string())
+        }
+    };
+    let c = cat.trim();
+    let rep =
+        corpus::import(&ws, &resolved, if c.is_empty() { None } else { Some(c) }).map_err(e2s)?;
+    Ok(CorpusImportResult {
+        cat: if c.is_empty() {
+            corpus::DEFAULT_CAT.to_string()
+        } else {
+            c.to_string()
+        },
+        copied: rep.copied,
+        identical: rep.identical,
+        skipped_binary: rep.skipped_binary,
+    })
 }
 
 pub fn output_read(ws_id: &str, rel: &str) -> Result<String, String> {
@@ -672,6 +715,48 @@ mod tests {
         let paths = ws_paths("corp-ws").unwrap();
         assert!(paths.corpus.starts_with(&paths.root));
         assert!(std::path::Path::new(&paths.corpus).is_dir());
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn corpus_import_from_customer_paths() {
+        let _serial = HOME_LOCK.lock().unwrap();
+        let home = std::env::temp_dir().join(format!("iw-dsk-cimp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        std::env::set_var("HOME", &home);
+
+        ws_create("cimp-ws").unwrap();
+        assert_eq!(
+            corpus_import("cimp-ws", "  ", "rules").unwrap_err(),
+            "empty_path"
+        );
+        // 不存在的源：引擎双语报错（非稳定 code），前端原样透出
+        assert!(corpus_import("cimp-ws", "~/没有这个目录", "rules").is_err());
+
+        // 客户材料留在原处：绝对路径目录、递归收集、剔除构建垃圾
+        let inbox = home.join("客户材料");
+        std::fs::create_dir_all(inbox.join("附件/node_modules")).unwrap();
+        std::fs::write(inbox.join("理赔规则.md"), "48 小时").unwrap();
+        std::fs::write(inbox.join("附件/接口清单.txt"), "POST /claim").unwrap();
+        std::fs::write(inbox.join("附件/node_modules/j.js"), "junk").unwrap();
+        let r = corpus_import("cimp-ws", inbox.to_str().unwrap(), "rules").unwrap();
+        assert_eq!(r.cat, "rules");
+        assert_eq!(r.copied, vec!["rules/理赔规则.md", "rules/接口清单.txt"]);
+        assert!(inbox.join("理赔规则.md").is_file(), "原件不许被动");
+        // 导入结果立刻进入面板模型（可点开编辑）
+        let list = corpus_list("cimp-ws").unwrap();
+        assert!(list.iter().any(|f| f.rel == "rules/理赔规则.md"));
+
+        // 幂等重导入：只记 identical
+        let r2 = corpus_import("cimp-ws", inbox.to_str().unwrap(), "rules").unwrap();
+        assert!(r2.copied.is_empty() && r2.identical == 2, "{r2:?}");
+
+        // 桌面端无 cwd 概念：裸相对路径按主目录解析；分类留空默认 other
+        std::fs::write(home.join("话术.md"), "您好").unwrap();
+        let r3 = corpus_import("cimp-ws", "话术.md", "").unwrap();
+        assert_eq!(r3.copied, vec!["other/话术.md"]);
+        assert_eq!(r3.cat, "other");
         let _ = std::fs::remove_dir_all(&home);
     }
 

@@ -77,7 +77,8 @@ pub fn run(ws: &Workspace, secrets_root: &Path) -> Result<Vec<Check>> {
     checks.push(Check::new(
         "corpus",
         corpus_has_files(ws).unwrap_or(false),
-        "需求语料 corpus/ 至少需要一个文件".into(),
+        "需求语料 corpus/ 至少需要一个文件（可用 `icewright corpus add <ws> <路径>` 从原处导入）"
+            .into(),
     ));
 
     let timeout = Duration::from_secs(3);

@@ -26,6 +26,11 @@ enum Cmd {
         #[command(subcommand)]
         action: PipelineAction,
     },
+    /// 需求语料摄入：客户材料留在原处，按路径导入工作区快照
+    Corpus {
+        #[command(subcommand)]
+        action: CorpusAction,
+    },
     /// 一键流水线：S1 自动初始化，顺序推进到最近的人类闸门（闸门A/闸门B）停等确认，确认后重跑续进
     Build { ws: String },
     /// workspace 配置读写（model.base_url、model.key_ref 等点号键）
@@ -105,6 +110,19 @@ enum PipelineAction {
         /// 只显示最近 n 条
         #[arg(long, default_value_t = 20)]
         tail: usize,
+    },
+}
+
+#[derive(Subcommand)]
+enum CorpusAction {
+    /// 把客户给的文件/目录（任意位置，支持 ~）拷贝进 corpus/<分类>/；目录递归收全，原件不动
+    Add {
+        ws: String,
+        /// 要导入的文件或目录路径，可给多个
+        paths: Vec<String>,
+        /// 目标分类（rules/apis/flows/dictionary/skills/other）；缺省 other
+        #[arg(long)]
+        cat: Option<String>,
     },
 }
 
@@ -258,6 +276,37 @@ fn cmd_ws_list() -> Result<()> {
     }
     for id in ids {
         println!("{id}");
+    }
+    Ok(())
+}
+
+fn cmd_corpus(action: &CorpusAction) -> Result<()> {
+    use icewright_core::corpus;
+    match action {
+        CorpusAction::Add { ws, paths, cat } => {
+            let ws = open_ws(ws)?;
+            if paths.is_empty() {
+                anyhow::bail!("{}", t("corpus_add_no_paths"));
+            }
+            for raw in paths {
+                let rep = corpus::import(&ws, raw, cat.as_deref())?;
+                println!(
+                    "{}",
+                    tf(
+                        "corpus_added",
+                        &[
+                            ("src", raw.trim()),
+                            ("n", &rep.copied.len().to_string()),
+                            ("same", &rep.identical.to_string()),
+                            ("bin", &rep.skipped_binary.to_string()),
+                        ]
+                    )
+                );
+                for rel in &rep.copied {
+                    println!("  + {rel}");
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -1260,6 +1309,7 @@ fn main() -> Result<()> {
             PipelineAction::History { ws, tail } => cmd_pipeline_history(ws, *tail),
         },
         Cmd::Build { ws } => cmd_build(ws),
+        Cmd::Corpus { action } => cmd_corpus(action),
         Cmd::Config { action } => match action {
             ConfigAction::Show { ws } => cmd_config_show(ws),
             ConfigAction::Set { ws, key, value } => cmd_config_set(ws, key, value),

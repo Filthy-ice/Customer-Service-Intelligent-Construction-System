@@ -67,6 +67,12 @@ var DICT = {
       corpus_files: "语料文件",
       corpus_name_ph: "文件名（如 refund.md）",
       corpus_add: "添加",
+      corpus_path_ph: "客户文件/目录路径（绝对或 ~/ 开头），导入到所选分类",
+      corpus_import: "从路径导入",
+      corpus_import_busy: "导入中…",
+      corpus_import_ok: "已导入 {0} 个文件到 corpus/{1}",
+      corpus_import_same: "（{0} 个内容相同未重复入库）",
+      corpus_import_bin: "（{0} 个非文本已跳过）",
       corpus_edit_ph: "在此编写或粘贴需求文本（markdown / 纯文本）",
       corpus_save: "保存语料",
       output_files: "生成文件",
@@ -80,7 +86,7 @@ var DICT = {
       delivery_state_pending: "交付目录已设定：{0}（尚未确认，生成会被拒绝）",
       delivery_state_none: "尚未设定交付目录：生成代码前须由客户规定去向",
       pick_file: "点左侧文件查看与编辑",
-      no_corpus: "暂无语料：下方选分类、输文件名添加",
+      no_corpus: "暂无语料：下方选分类新建，或用「从路径导入」收客户材料",
       no_output: "尚未生成项目：确认交付目录后，在「流程」页点「生成代码」",
       saved: "已保存 {0}",
       corpus_added: "已创建 {0}，编辑后记得保存",
@@ -98,6 +104,7 @@ var DICT = {
       err_rel: "文件路径不合法（语料须为「分类/文件名」，禁止 .. 和绝对路径）",
       err_big: "文件超过 4 MB 上限",
       err_empty_dest: "交付目录不能为空",
+      err_empty_path: "请输入要导入的文件或目录路径",
       err_need_abs: "交付目录必须是绝对路径（或 ~ 开头的家目录路径）",
       err_empty_output: "output/ 尚无生成物可导出：先在「流程」页完成生成",
     },
@@ -165,6 +172,12 @@ var DICT = {
       corpus_files: "Corpus files",
       corpus_name_ph: "File name (e.g. refund.md)",
       corpus_add: "Add",
+      corpus_path_ph: "Customer file/folder path (absolute or ~/...), imported into the selected category",
+      corpus_import: "Import from path",
+      corpus_import_busy: "Importing…",
+      corpus_import_ok: "Imported {0} file(s) into corpus/{1}",
+      corpus_import_same: "({0} already present with identical content)",
+      corpus_import_bin: "({0} non-text file(s) skipped)",
       corpus_edit_ph: "Write or paste requirement text here (markdown / plain text)",
       corpus_save: "Save corpus",
       output_files: "Generated files",
@@ -178,7 +191,7 @@ var DICT = {
       delivery_state_pending: "Delivery folder set: {0} (not confirmed yet — generation will be refused)",
       delivery_state_none: "No delivery folder yet: the customer must choose where artifacts go before generation",
       pick_file: "Pick a file on the left to view and edit",
-      no_corpus: "No corpus yet: choose a category and add a file below",
+      no_corpus: "No corpus yet: add a file below, or import the customer's files by path",
       no_output: "No generated project yet: confirm the delivery folder, then run \"Generate code\" in the Flow tab",
       saved: "Saved {0}",
       corpus_added: "Created {0}; edit it and remember to save",
@@ -196,6 +209,7 @@ var DICT = {
       err_rel: "Invalid file path (corpus must be \"category/file\", no .. or absolute paths)",
       err_big: "File exceeds the 4 MB limit",
       err_empty_dest: "Delivery folder is required",
+      err_empty_path: "Enter a file or folder path to import",
       err_need_abs: "Delivery folder must be absolute (or start with ~ for your home directory)",
       err_empty_output: "Nothing to export yet: finish \"Generate code\" in the Flow tab first",
     },
@@ -518,6 +532,7 @@ var lastWs = null;              // 切换工作区时重置编辑区状态
 var corpusRel = null, corpusBase = "";
 var outRel = null, outBase = "";
 var catsLoaded = false;
+var importing = false;          // 语料导入进行中标记（防连点）
 
 function panelStatus(id, msg) { $(id).textContent = msg; }
 
@@ -617,6 +632,30 @@ function addCorpus() {
     .then(function () { return openCorpus(rel); })
     .then(function () { panelStatus("corpus-status", "✔ " + fmt(U("corpus_added"), [rel])); })
     .catch(function (err) { panelStatus("corpus-status", "✘ " + setErr(err)); });
+}
+
+// 客户材料不必搬进工作区：给路径即可，引擎拷成 corpus/<分类>/ 快照，原件不动。
+function importCorpus() {
+  if (!selected) { panelStatus("corpus-status", "✘ " + U("set_pick_ws")); return; }
+  if (corpusDirty()) { panelStatus("corpus-status", "✘ " + U("unsaved_first")); return; }
+  var p = $("corpus-path").value.trim();
+  if (!p) { panelStatus("corpus-status", "✘ " + U("err_empty_path")); return; }
+  if (importing) { return; }
+  importing = true;
+  var btn = $("corpus-import");
+  btn.disabled = true;
+  panelStatus("corpus-status", "… " + U("corpus_import_busy"));
+  invoke("corpus_import", { wsId: selected, path: p, cat: $("corpus-cat").value })
+    .then(function (r) {
+      $("corpus-path").value = "";
+      var msg = fmt(U("corpus_import_ok"), [String(r.copied.length), r.cat]);
+      if (r.identical) { msg += fmt(U("corpus_import_same"), [String(r.identical)]); }
+      if (r.skipped_binary) { msg += fmt(U("corpus_import_bin"), [String(r.skipped_binary)]); }
+      panelStatus("corpus-status", "✔ " + msg);
+      return loadCorpus();
+    })
+    .catch(function (err) { panelStatus("corpus-status", "✘ " + setErr(err)); })
+    .then(function () { importing = false; btn.disabled = false; });
 }
 
 function saveCorpus() {
@@ -725,6 +764,10 @@ function initViewTabs() {
   $("corpus-name").addEventListener("keydown", function (e) {
     if (e.key === "Enter") { addCorpus(); }
   });
+  $("corpus-import").onclick = importCorpus;
+  $("corpus-path").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { importCorpus(); }
+  });
   $("corpus-save").onclick = saveCorpus;
   $("corpus-open").onclick = function () { openDir("open_corpus_dir", "corpus-status"); };
   $("output-save").onclick = saveOutput;
@@ -803,6 +846,7 @@ function setErr(err) {
     invalid_rel: "err_rel",
     file_too_large: "err_big",
     empty_dest: "err_empty_dest",
+    empty_path: "err_empty_path",
     need_abs: "err_need_abs",
   };
   var key = map[String(err)];

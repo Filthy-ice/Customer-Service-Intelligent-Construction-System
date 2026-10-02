@@ -26,7 +26,9 @@ pub fn is_en() -> bool {
 
 const MESSAGES: &[(&str, &str, &str)] = &[
     ("ws_created", "已创建 workspace: {path}", "Workspace created: {path}"),
-    ("ws_next", "下一步：编辑 icewright.toml 配置模型与行业包，需求文档按分类放入 corpus/{apis|flows|dictionary|rules|skills|other}/（约定见 corpus/README.md）", "Next: edit icewright.toml to configure the model and industry pack, and place requirement docs into corpus/{apis|flows|dictionary|rules|skills|other}/ per the corpus/README.md conventions"),
+    ("ws_next", "下一步：编辑 icewright.toml 配置模型与行业包；需求材料留在原处，用 `icewright corpus add <ws> <文件或目录路径>` 导入（约定见 corpus/README.md）", "Next: edit icewright.toml to configure the model and industry pack; keep requirement files where they are and import them with `icewright corpus add <ws> <file-or-folder>` (see corpus/README.md)"),
+    ("corpus_added", "已导入 {src}：新增 {n} 个、内容相同跳过 {same} 个、非文本跳过 {bin} 个", "Imported {src}: {n} new, {same} skipped as identical, {bin} skipped as non-text"),
+    ("corpus_add_no_paths", "请给出至少一个要导入的文件或目录路径", "Give at least one file or folder path to import"),
     ("ws_none", "（无 workspace，用 `icewright ws new <id>` 创建）", "(no workspaces — create one with `icewright ws new <id>`)"),
     ("pipeline_exists", "pipeline 已存在: {path}（重跑请先归档到 pipeline/history/）", "pipeline already exists: {path} (archive it to pipeline/history/ before rerunning)"),
     ("pipeline_inited", "已初始化 {run}（{path}）", "Initialized {run} ({path})"),
@@ -148,6 +150,8 @@ const SUB_HELP: &[(&str, &str)] = &[
     ("pipeline extract", "S3 domain artifact extraction (contract validation + repair loop + cross-artifact reference checks)"),
     ("pipeline status", "print the pipeline status table of a workspace"),
     ("pipeline history", "print the generation history (pipeline/history.jsonl, chronological)"),
+    ("corpus", "requirement corpus intake: customers keep files where they are, the tool imports them by path"),
+    ("corpus add", "copy customer files/folders (any location, ~/... supported) into corpus/<category>/; folders are ingested recursively, originals untouched"),
     ("build", "one-shot pipeline: auto-initialize S1, advance to the next human gate (Gate A/B) and pause; rerun after approval to resume"),
     ("config", "read/write workspace config (dot keys such as model.base_url, model.key_ref)"),
     ("config show", "print the effective config (raw icewright.toml)"),
@@ -186,6 +190,16 @@ const ARG_HELP: &[(&str, &str, &str)] = &[
         "pipeline extract",
         "kinds",
         "extract only these artifact kinds (apis/flows/dictionary/rules/skills); default extracts all five in dependency order",
+    ),
+    (
+        "corpus add",
+        "paths",
+        "files or folders to import (absolute or ~/... paths, several allowed)",
+    ),
+    (
+        "corpus add",
+        "cat",
+        "target category (rules/apis/flows/dictionary/skills/other); defaults to other",
     ),
     (
         "delivery set",

@@ -303,6 +303,18 @@ fn corpus_cats() -> Vec<&'static str> {
     ops::CORPUS_CATS.to_vec()
 }
 
+/// 语料按路径导入：客户材料留在原处，拷贝进 corpus/<分类>/ 快照（目录拷贝放阻塞线程池）。
+#[tauri::command]
+async fn corpus_import(
+    ws_id: String,
+    path: String,
+    cat: String,
+) -> Result<ops::CorpusImportResult, String> {
+    tauri::async_runtime::spawn_blocking(move || ops::corpus_import(&ws_id, &path, &cat))
+        .await
+        .map_err(|e| format!("导入任务崩溃: {e}"))?
+}
+
 #[tauri::command]
 fn output_list(ws_id: String) -> Result<Vec<ops::WsFile>, String> {
     ops::output_list(&ws_id)
@@ -574,6 +586,7 @@ fn main() {
             corpus_read,
             corpus_save,
             corpus_cats,
+            corpus_import,
             output_list,
             output_read,
             output_save,
