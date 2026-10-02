@@ -21,4 +21,11 @@
 #
 # 测试：pytest tests/
 #
+# 部署前必读：init/ 目录
+#   init/config.example.env —— 全部运行时配置项（IW_*）集中清单：应用只读环境变量，
+#     本机用 .env，有配置中心（Nacos/Apollo/K8s 等）就托管到中心再注入，代码零改动；
+#     密钥只允许动态注入，永不入库。
+#   init/schema.sql —— 核心系统只读表示例契约（联调/对账用，勿执行到客户生产库）。
+#   init/README.md —— 部署步骤与开发/业务使用说明的去处。
+#
 # 定制保护：在任何生成文件头部加一行 `ICEWRIGHT-CUSTOM`，重生成即跳过该文件。

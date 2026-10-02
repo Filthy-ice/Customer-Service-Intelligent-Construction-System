@@ -24,4 +24,14 @@ curl localhost:8000/healthz
 # 测试：go test ./...
 ```
 
+## 部署前必读：init/ 目录
+
+- `init/config.example.env`：全部运行时配置项（`IW_*`）集中清单。应用只读环境变量——
+  本机跑用 `.env`；有配置中心（Nacos/Apollo/K8s ConfigMap 等）就把同名键托管到中心
+  再注入进程环境，`config.go` 的 envOr 读取照常生效，代码零改动；
+  密钥只允许动态注入，永不入库。
+- `init/schema.sql`：核心系统只读表的**示例契约** DDL（联调建演示库或对账映射用，
+  勿执行到客户生产库）。
+- `init/README.md`：部署步骤与开发/业务使用说明的去处。
+
 定制保护：在任何生成文件头部加一行 `ICEWRIGHT-CUSTOM`，重生成即跳过该文件。

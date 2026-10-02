@@ -310,6 +310,24 @@ static TEMPLATES_GO: &[(&str, &str)] = &[
     ),
 ];
 
+/// 三栈统一追加的 init/ 部署物料：集中配置清单 + 示例 SQL + 部署须知。
+/// 交付纪律：运行时配置只走 IW_* 环境变量（local .env 或配置中心注入皆可），
+/// 密钥永不入库；schema.sql 是只读契约示例，绝不写死到客户生产库。
+static TEMPLATES_INIT: &[(&str, &str)] = &[
+    (
+        "init/schema.sql",
+        include_str!("../templates/common/init/schema.sql"),
+    ),
+    (
+        "init/config.example.env",
+        include_str!("../templates/common/init/config.example.env"),
+    ),
+    (
+        "init/README.md",
+        include_str!("../templates/common/init/README.md"),
+    ),
+];
+
 /// 栈 → (模板表, 规则/技能数据嵌入目录)。
 fn stack_layout(stack: &str) -> Option<(&'static [(&'static str, &'static str)], &'static str)> {
     match stack {
@@ -456,12 +474,18 @@ pub fn generate(ws: &Workspace, out_dir: &Path) -> Result<GenerateReport> {
 
     let cfg = ws.config()?;
     // 生成适配器按栈分目标实现；未实现的栈必须拒绝，绝不把 python 骨架冒充 java/go 交付。
-    let Some((templates, data_rel)) = stack_layout(&cfg.workspace.stack) else {
+    let Some((stack_templates, data_rel)) = stack_layout(&cfg.workspace.stack) else {
         bail!(
             "S5 生成暂只支持 stack=python|java|go；stack={:?} 的适配器在路线图上，尚未实现，拒绝输出错栈项目",
             cfg.workspace.stack
         );
     };
+    // init/ 部署物料对三栈统一追加：集中配置清单 + 示例 SQL + 部署须知
+    let templates: Vec<(&'static str, &'static str)> = stack_templates
+        .iter()
+        .chain(TEMPLATES_INIT)
+        .copied()
+        .collect();
     // 契约硬闸：技能须逐条人工确认（模型一律输出 pending），未确认技能不进运行时
     let skills_path = ws.artifact_path(crate::extract::SKILLS_ARTIFACT);
     let skills_raw = if skills_path.exists() {
@@ -587,7 +611,7 @@ pub fn generate(ws: &Workspace, out_dir: &Path) -> Result<GenerateReport> {
         prev: &prev_manifest,
         hashes: Default::default(),
     };
-    for (rel, tpl) in templates {
+    for &(rel, tpl) in &templates {
         let target = out_dir.join(rel);
         if target.exists() && has_custom_marker(&target) {
             o.preserve(out_dir, rel);
@@ -781,14 +805,21 @@ mod tests {
         assert!(report.preserved.is_empty());
         assert_eq!(
             report.written.len(),
-            TEMPLATES_PY.len() + 1,
-            "模板 + rules.json"
+            TEMPLATES_PY.len() + TEMPLATES_INIT.len() + 1,
+            "模板 + init 部署物料 + rules.json"
         );
         let main_py = std::fs::read_to_string(out.join("app/main.py")).unwrap();
         assert!(main_py.contains(&ws.id), "project_name 槽位应渲染");
         assert!(!main_py.contains("{{"));
         assert!(out.join("app/data/rules.json").exists());
         assert!(out.join("app/domain/i18n.py").exists());
+        assert!(
+            out.join("init/schema.sql").exists() && out.join("init/config.example.env").exists(),
+            "init/ 部署物料必须随三栈交付"
+        );
+        let init_readme = std::fs::read_to_string(out.join("init/README.md")).unwrap();
+        assert!(init_readme.contains("部署前"), "{init_readme}");
+        assert!(!init_readme.contains("{{"), "init 模板槽位应全部渲染");
         let chat_html = std::fs::read_to_string(out.join("static/chat.html")).unwrap();
         assert!(!chat_html.contains("{{"), "静态页面槽位应全部渲染");
         assert!(chat_html.contains(&ws.id), "页面标题应含项目名");
@@ -821,8 +852,11 @@ mod tests {
         let ws = setup("diff");
         let out = ws.root.join("output");
         let r1 = generate(&ws, &out).unwrap();
-        // 首轮：模板 + rules.json 全部新建
-        assert_eq!(r1.diff.created.len(), TEMPLATES_PY.len() + 1);
+        // 首轮：模板 + init 部署物料 + rules.json 全部新建
+        assert_eq!(
+            r1.diff.created.len(),
+            TEMPLATES_PY.len() + TEMPLATES_INIT.len() + 1
+        );
         assert!(r1.diff.modified.is_empty());
         assert!(r1.diff.unchanged.is_empty());
         assert!(r1.diff.removed.is_empty());
@@ -830,7 +864,10 @@ mod tests {
         // 二轮无变化：全部 unchanged，哈希一致
         let r2 = generate(&ws, &out).unwrap();
         assert!(r2.diff.created.is_empty());
-        assert_eq!(r2.diff.unchanged.len(), TEMPLATES_PY.len() + 1);
+        assert_eq!(
+            r2.diff.unchanged.len(),
+            TEMPLATES_PY.len() + TEMPLATES_INIT.len() + 1
+        );
         assert_eq!(r2.output_hash, r1.output_hash);
 
         // 修改规则产物 → 只有数据文件被报为更新
@@ -1016,8 +1053,8 @@ mod tests {
         let report = generate(&ws, &out).unwrap();
         assert_eq!(
             report.written.len(),
-            TEMPLATES_GO.len() + 3,
-            "模板 + rules.json + 默认 skills.json + 默认 apis.json"
+            TEMPLATES_GO.len() + TEMPLATES_INIT.len() + 3,
+            "模板 + init 部署物料 + rules.json + 默认 skills.json + 默认 apis.json"
         );
         assert!(
             out.join("assets/apis.json").exists(),
@@ -1117,8 +1154,8 @@ mod tests {
         let report = generate(&ws, &out).unwrap();
         assert_eq!(
             report.written.len(),
-            TEMPLATES_JAVA.len() + 1,
-            "模板 + rules.json"
+            TEMPLATES_JAVA.len() + TEMPLATES_INIT.len() + 1,
+            "模板 + init 部署物料 + rules.json"
         );
         assert!(
             !out.join("app/main.py").exists(),

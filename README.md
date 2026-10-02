@@ -10,6 +10,7 @@
 - **契约先行**：所有领域产物均受 JSON Schema（draft 2020-12）约束，跨产物引用做完整性校验（悬空字段/未知流程/未确认接口/失效技能绑定一律拦截）。接口存在性与技能生效均由人工逐条确认（模型一律输出未确认态），未确认接口/技能在 S5 生成阶段被硬闸拒绝；生成项目运行时只装载已确认技能。
 - **生成系统不落业务数据**：会话槽位放 Redis，业务数据运行时实时调用客户核心系统 API（接口契约驱动，支持 mock 回放评测）。自带多语言聊天页面（zh/en 访客可选），固定话术与模型回复均跟随所选语言。页面矩阵三栈一致：`/` 开发调试聊天页（回显命中规则与会话槽位）、`/admin` 开发后台（只读规则/技能/接口契约与运行态）、`/console` 业务人员后台（可选，闸门A 开启 `workspace.business_console` 后生成，列出命中拦截/转人工/禁语规则的待关注会话）。
 - **三目标栈生成**：`workspace.stack` 支持 `python`（FastAPI）、`java`（Spring Boot 3 / JDK 21）与 `go`（标准库 net/http + go-redis，领域产物 //go:embed 进二进制），三栈 HTTP 线格式一致（同一聊天页与 curl 冒烟通用）、规则/技能语义逐文件对齐；S2 预检探测对应工具链，S6 按栈分派验证（python 编译+pytest / java Maven compile+test / go build+test）。未实现的栈 S5 明确拒绝、绝不冒充交付。
+- **生成物配置纪律（init/ 交付物）**：生成系统运行时配置只读 `IW_*` 环境变量——本机用本地 `.env`/yml 占位，有企业配置中心（Nacos/Apollo/Spring Cloud Config/K8s）就托管到中心再注入进程环境，代码零改动；密钥、接入点、库地址永不写死。每次生成统一附带 `init/config.example.env`（全部配置项集中清单与注入方式说明）、`init/schema.sql`（核心系统只读表的示例契约 DDL，联调对账用，绝不执行到客户生产库）与 `init/README.md`（部署步骤）；三栈工程 README 均明文标注"部署前必读：init/"。
 - **生成物站在成熟 Agent 框架上**：客服项目不手搓驱动 AI 的框架。引擎内置每栈框架候选与对比表（调研快照 2026-10-01：python 默认 AgentScope、java 默认 Spring AI、go 默认 CloudWeGo Eino，均支持 OpenAI-compatible BYOK 端点），选型随设计文档进闸门A 人工确认，`workspace.agent_framework` 可覆盖；模板未落地集成的框架在设计文档如实标注状态。
 - **可断点续跑**：每个 workspace 独立隔离，状态机可恢复；产物任何变更自动作废已有人工确认，杜绝"批过的设计"与"生成的代码"脱节。
 - **生成历史与语料分类**：每次有状态推进（预检、提取、渲染、生成、验证、交付、两道闸门决策）自动追加到 workspace 的 `pipeline/history.jsonl`，`icewright pipeline history` 按时间回看全程；需求语料按 `corpus/{apis|flows|dictionary|rules|skills|other}/` 分类子目录投放，提取时递归读取。
@@ -94,7 +95,7 @@ key_ref = "env://DEEPSEEK_API_KEY"     # 见下"模型接入与密钥"
 
 ### 模型接入与密钥（BYOK）
 
-**这个密钥是构建器（本软件）调模型用的，不是生成出来的客服系统的运行密钥**——生成系统的模型配置在产出工程的 `.env.example` 中另行提供。
+**这个密钥是构建器（本软件）调模型用的，不是生成出来的客服系统的运行密钥**——生成系统的模型配置在产出工程的 `.env.example` 与 `init/config.example.env` 中另行提供（只收环境变量引用，见上条配置纪律）。
 
 `model.key_ref` 支持三种引用格式：
 
