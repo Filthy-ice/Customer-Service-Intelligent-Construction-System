@@ -10,12 +10,14 @@
   <div class="layout">
     <aside>
       <h1>IceWright <span id="ver"></span></h1>
-      <div class="section-title">工作区</div>
+      <div class="section-title" data-i18n="workspaces">工作区</div>
       <ul id="ws-list"></ul>
-      <div class="hint">运行 <code>icewright ws new &lt;id&gt;</code> 创建新工作区</div>
+      <div class="hint"><span data-i18n="hint_pre">运行</span>
+        <code>icewright ws new &lt;id&gt;</code><span data-i18n="hint_post">创建新工作区</span>
+      </div>
     </aside>
     <main>
-      <div id="empty" class="empty">选择左侧工作区查看进度与历史</div>
+      <div id="empty" class="empty" data-i18n="empty_pick">选择左侧工作区查看进度与历史</div>
       <section id="detail" class="hidden">
         <header>
           <h2 id="ws-title"></h2>
@@ -29,11 +31,11 @@
         <pre id="op-result" class="op-result hidden"></pre>
         <table class="stages">
           <thead>
-            <tr><th>阶段</th><th>名称</th><th>状态</th><th>产物哈希</th><th>闸门</th></tr>
+            <tr><th data-i18n="th_stage">阶段</th><th data-i18n="th_name">名称</th><th data-i18n="th_status">状态</th><th data-i18n="th_hash">产物哈希</th><th data-i18n="th_gate">闸门</th></tr>
           </thead>
           <tbody id="stage-rows"></tbody>
         </table>
-        <h3>生成历史</h3>
+        <h3 data-i18n="history">生成历史</h3>
         <ul id="history"></ul>
       </section>
     </main>

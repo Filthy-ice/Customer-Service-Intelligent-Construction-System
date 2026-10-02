@@ -35,6 +35,12 @@ fn app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+/// 界面文案语种（workspace.locale，读不到回退 zh）。
+#[tauri::command]
+fn ws_locale(ws_id: String) -> String {
+    ops::locale(&ws_id)
+}
+
 /// 推进操作：dispatch 是阻塞的引擎调用，放到 spawn_blocking 里避免卡住 UI 线程。
 #[tauri::command]
 async fn run_op(op: String, ws_id: String, note: Option<String>) -> Result<String, String> {
@@ -50,6 +56,7 @@ fn main() {
             pipeline_status,
             history_tail,
             app_version,
+            ws_locale,
             run_op
         ])
         .run(tauri::generate_context!())

@@ -49,6 +49,14 @@ fn next_run_id(ws_dir: &std::path::Path, date: &str) -> String {
     format!("{prefix}{:04}", max_seq + 1)
 }
 
+/// UI 文案语种跟随 workspace.locale（读不到就回退 zh）。
+pub fn locale(ws_id: &str) -> String {
+    open(ws_id)
+        .and_then(|ws| ws.config().map_err(e2s))
+        .map(|cfg| cfg.workspace.locale)
+        .unwrap_or_else(|_| "zh".to_string())
+}
+
 pub fn dispatch(op: &str, ws_id: &str, note: Option<&str>) -> Result<String, String> {
     let _guard = Guard::acquire()?;
     // 引擎报错语种跟随 workspace.locale（读不到就保持默认 zh）
@@ -217,6 +225,27 @@ mod tests {
 
     // HOME 重定向影响全局搜索路径，串行执行。
     static HOME_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn locale_follows_workspace_config() {
+        let _serial = HOME_LOCK.lock().unwrap();
+        let home = std::env::temp_dir().join(format!("iw-dsk-loc-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        std::env::set_var("HOME", &home);
+
+        Workspace::create("loc-ws").unwrap();
+        assert_eq!(locale("loc-ws"), "zh");
+        let cfg_path = Workspace::open("loc-ws")
+            .unwrap()
+            .root
+            .join("icewright.toml");
+        icewright_core::config::set_and_save(&cfg_path, "workspace.locale", "en").unwrap();
+        assert_eq!(locale("loc-ws"), "en");
+        // 工作区不存在时回退 zh 而不是报错
+        assert_eq!(locale("no-such-ws"), "zh");
+        let _ = std::fs::remove_dir_all(&home);
+    }
 
     #[test]
     fn dispatch_init_and_preflight_end_to_end_under_temp_home() {
