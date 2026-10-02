@@ -68,7 +68,28 @@ var DICT = {
   },
 };
 
-var lang = "zh";
+// 手动语言选择优先于 workspace.locale，并跨重启记忆（开源用户可能不配置 locale）。
+var langPref = null;
+try { langPref = localStorage.getItem("iw-lang"); } catch (e) { langPref = null; }
+if (langPref !== "en" && langPref !== "zh") { langPref = null; }
+var lang = langPref || "zh";
+function syncLang(l) {
+  lang = l;
+  langPref = l;
+  try { localStorage.setItem("iw-lang", l); } catch (e) { /* 隐私模式下忽略 */ }
+  applyStatic();
+  renderLangToggle();
+}
+function renderLangToggle() {
+  $("lang-zh").classList.toggle("active", lang === "zh");
+  $("lang-en").classList.toggle("active", lang === "en");
+}
+function initLangToggle() {
+  $("lang-zh").onclick = function () { syncLang("zh"); refresh(); };
+  $("lang-en").onclick = function () { syncLang("en"); refresh(); };
+  applyStatic();
+  renderLangToggle();
+}
 function L() { return DICT[lang] || DICT.zh; }
 function U(key) {
   var v = L().ui[key];
@@ -135,7 +156,8 @@ function renderStatus(st) {
     var cell = document.createElement("div");
     cell.className = "step " + s.status;
     cell.title = L().status[s.status] || s.status;
-    cell.innerHTML = "<b>" + esc(s.id) + "</b><i>" + esc(s.id.replace("S", "")) + "</i>";
+    cell.innerHTML = "<b>" + esc(s.id) + "</b>" +
+      "<span class='nm'>" + esc(titleOf(s.id)) + "</span>";
     step.appendChild(cell);
   });
   var rows = $("stage-rows");
@@ -278,10 +300,11 @@ async function renderHistory() {
 async function refresh() {
   if (!selected) { return; }
   var loc = await invoke("ws_locale", { wsId: selected });
-  var next = String(loc).trim().toLowerCase() === "en" ? "en" : "zh";
+  var next = langPref || (String(loc).trim().toLowerCase() === "en" ? "en" : "zh");
   if (next !== lang) {
     lang = next;
     applyStatic();
+    renderLangToggle();
   }
   var st = await invoke("pipeline_status", { wsId: selected });
   $("empty").classList.add("hidden");
@@ -302,6 +325,7 @@ async function tick() {
 }
 
 invoke("app_version").then(function (v) { $("ver").textContent = "v" + v; });
+initLangToggle();
 initActions();
 tick();
 setInterval(tick, 2000);

@@ -17,10 +17,15 @@ main { flex: 1; padding: 20px 24px; overflow-y: auto; }
 header h2 { margin: 0 0 4px; }
 #run-meta { font-size: 12px; opacity: .7; margin-bottom: 16px; }
 .stepper { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
-.step { width: 56px; height: 44px; border-radius: 8px; border: 1px solid var(--line);
-        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
+.step { width: 108px; min-height: 52px; border-radius: 8px; border: 1px solid var(--line);
+        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+        padding: 6px 4px; }
 .step b { font-size: 13px; }
-.step i { font-size: 10px; font-style: normal; opacity: .6; }
+.step .nm { font-size: 10px; opacity: .75; text-align: center; line-height: 1.25; }
+.lang-toggle { display: flex; gap: 4px; margin-bottom: 4px; }
+.lang-toggle button { border: 1px solid var(--line); background: transparent; border-radius: 6px;
+  padding: 2px 12px; cursor: pointer; font-family: inherit; font-size: 12px; opacity: .7; }
+.lang-toggle button.active { background: var(--accent); color: #fff; border-color: var(--accent); opacity: 1; }
 .step.approved { background: #16a34a22; border-color: #16a34a88; }
 .step.running { background: var(--accent); color: #fff; border-color: var(--accent); }
 .step.waiting_gate { background: #f59e0b33; border-color: #f59e0b; }
