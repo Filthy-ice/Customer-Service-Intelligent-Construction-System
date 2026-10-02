@@ -24,9 +24,6 @@
       </div>
       <div id="ws-note" class="ws-note hidden"></div>
       <ul id="ws-list"></ul>
-      <div class="hint"><span data-i18n="hint_pre">运行</span>
-        <code>icewright ws new &lt;id&gt;</code><span data-i18n="hint_post">创建新工作区</span>
-      </div>
     </aside>
     <main>
       <div id="empty" class="empty" data-i18n="empty_pick">选择左侧工作区查看进度与历史</div>
@@ -35,20 +32,72 @@
           <h2 id="ws-title"></h2>
           <div id="run-meta"></div>
         </header>
-        <div id="stepper" class="stepper"></div>
-        <section id="actions" class="actions">
-          <input id="op-note" type="text" placeholder="驳回原因（驳回类操作必填）" />
-          <div id="op-buttons"></div>
-        </section>
-        <pre id="op-result" class="op-result hidden"></pre>
-        <table class="stages">
-          <thead>
-            <tr><th data-i18n="th_stage">阶段</th><th data-i18n="th_name">名称</th><th data-i18n="th_status">状态</th><th data-i18n="th_hash">产物哈希</th><th data-i18n="th_gate">闸门</th></tr>
-          </thead>
-          <tbody id="stage-rows"></tbody>
-        </table>
-        <h3 data-i18n="history">生成历史</h3>
-        <ul id="history"></ul>
+        <nav class="view-tabs">
+          <button id="vtab-flow" type="button" class="active" data-i18n="tab_flow">流程</button>
+          <button id="vtab-corpus" type="button" data-i18n="tab_corpus">需求语料</button>
+          <button id="vtab-output" type="button" data-i18n="tab_output">生成项目</button>
+        </nav>
+        <div id="vpane-flow">
+          <div id="stepper" class="stepper"></div>
+          <section id="actions" class="actions">
+            <input id="op-note" type="text" placeholder="驳回原因（驳回类操作必填）" />
+            <div id="op-buttons"></div>
+          </section>
+          <pre id="op-result" class="op-result hidden"></pre>
+          <table class="stages">
+            <thead>
+              <tr><th data-i18n="th_stage">阶段</th><th data-i18n="th_name">名称</th><th data-i18n="th_status">状态</th><th data-i18n="th_hash">产物哈希</th><th data-i18n="th_gate">闸门</th></tr>
+            </thead>
+            <tbody id="stage-rows"></tbody>
+          </table>
+          <h3 data-i18n="history">生成历史</h3>
+          <ul id="history"></ul>
+        </div>
+        <div id="vpane-corpus" class="hidden">
+          <div class="pane-head">
+            <span class="pane-path" id="corpus-dir"></span>
+            <button id="corpus-open" class="link-btn" type="button" data-i18n="open_in_folder">在文件夹中打开</button>
+          </div>
+          <div class="file-split">
+            <div class="file-side">
+              <div class="sec-label"><span data-i18n="corpus_files">语料文件</span><span class="count" id="corpus-count"></span></div>
+              <ul id="corpus-list" class="file-list"></ul>
+              <div class="new-file">
+                <select id="corpus-cat"></select>
+                <input id="corpus-name" type="text" data-i18n-ph="corpus_name_ph" />
+                <button id="corpus-add" type="button" data-i18n="corpus_add">添加</button>
+              </div>
+            </div>
+            <div class="file-main">
+              <div class="edit-head" id="corpus-edit-head"></div>
+              <textarea id="corpus-editor" class="editor" spellcheck="false" data-i18n-ph="corpus_edit_ph"></textarea>
+              <div class="edit-foot">
+                <span id="corpus-status" class="edit-status"></span>
+                <button id="corpus-save" class="primary" type="button" disabled data-i18n="corpus_save">保存语料</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div id="vpane-output" class="hidden">
+          <div class="pane-head">
+            <span class="pane-path" id="output-dir"></span>
+            <button id="output-open" class="link-btn" type="button" data-i18n="open_in_folder">在文件夹中打开</button>
+          </div>
+          <div class="file-split">
+            <div class="file-side">
+              <div class="sec-label"><span data-i18n="output_files">生成文件</span><span class="count" id="output-count"></span></div>
+              <ul id="output-list" class="file-list tall"></ul>
+            </div>
+            <div class="file-main">
+              <div class="edit-head" id="output-edit-head"></div>
+              <textarea id="output-editor" class="editor" spellcheck="false" data-i18n-ph="output_edit_ph"></textarea>
+              <div class="edit-foot">
+                <span id="output-status" class="edit-status"></span>
+                <button id="output-save" class="primary" type="button" disabled data-i18n="output_save">保存修改</button>
+              </div>
+            </div>
+          </div>
+        </div>
       </section>
     </main>
   </div>

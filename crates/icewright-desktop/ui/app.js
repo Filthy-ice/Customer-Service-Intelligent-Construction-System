@@ -16,18 +16,18 @@ var DICT = {
       S5: "代码生成", S6: "自动验证", S7: "验收交付与闸门B", S8: "变更/重生成",
     },
     ops: {
-      init: "初始化", preflight: "环境预检", design_render: "渲染设计",
+      init: "初始化", preflight: "环境预检", extract: "提取语料", design_render: "渲染设计",
       design_approve: "批准闸门A", design_reject: "驳回闸门A", generate: "生成代码",
       verify: "自动验证", delivery_render: "渲染交付",
       delivery_approve: "批准闸门B", delivery_reject: "驳回闸门B",
     },
     ui: {
-      workspaces: "工作区", hint_pre: "运行", hint_post: "创建新工作区",
+      workspaces: "工作区",
       empty_pick: "选择左侧工作区查看进度与历史",
       th_stage: "阶段", th_name: "名称", th_status: "状态", th_hash: "产物哈希", th_gate: "闸门",
       history: "生成历史",
       note_placeholder: "驳回原因（驳回类操作必填）",
-      not_init: "尚未初始化 pipeline：点下方「初始化」或运行 icewright pipeline init",
+      not_init: "尚未初始化 pipeline：点下方「初始化」启动",
       stage_now: "当前阶段", updated: "更新于",
       arm: "再点一次确认",
       executing: "{0} 执行中…",
@@ -68,10 +68,36 @@ var DICT = {
       ws_created: "已创建工作区 {0}：选中后点「初始化」启动管线",
       ws_empty_id: "请输入工作区 ID",
       aside_toggle: "收起 / 展开侧栏",
+      tab_flow: "流程",
+      tab_corpus: "需求语料",
+      tab_output: "生成项目",
+      open_in_folder: "在文件夹中打开",
+      corpus_files: "语料文件",
+      corpus_name_ph: "文件名（如 refund.md）",
+      corpus_add: "添加",
+      corpus_edit_ph: "在此编写或粘贴需求文本（markdown / 纯文本）",
+      corpus_save: "保存语料",
+      output_files: "生成文件",
+      output_edit_ph: "点左侧文件查看，可直接编辑后保存",
+      output_save: "保存修改",
+      pick_file: "点左侧文件查看与编辑",
+      no_corpus: "暂无语料：下方选分类、输文件名添加",
+      no_output: "尚未生成项目：在「流程」页推进到「生成代码」",
+      saved: "已保存 {0}",
+      corpus_added: "已创建 {0}，编辑后记得保存",
+      corpus_exists: "该语料文件已存在，直接在左侧点开编辑",
+      corpus_empty_name: "请输入文件名",
+      unsaved_first: "有未保存的修改：请先保存",
+      output_saved: "已保存 {0}（注意：S8 重生成可能覆盖手工修改）",
+      open_dir_fail: "打开文件夹失败：{0}",
       err_base: "接入点必须以 http(s):// 开头",
       err_model: "模型名不能为空",
       err_key: "密钥引用格式不合法（掩码值需重新输入）",
       err_no_key: "未找到密钥环境变量：请填写密钥引用或先设置对应变量",
+      err_need_init: "pipeline 尚未初始化：先在「流程」页点「初始化」",
+      err_s2_not_approved: "S2 环境预检未批准：先在「流程」页执行预检",
+      err_rel: "文件路径不合法（语料须为「分类/文件名」，禁止 .. 和绝对路径）",
+      err_big: "文件超过 4 MB 上限",
     },
   },
   en: {
@@ -86,18 +112,18 @@ var DICT = {
       S7: "Delivery & Gate B", S8: "Change / regeneration",
     },
     ops: {
-      init: "Init", preflight: "Preflight", design_render: "Render design",
+      init: "Init", preflight: "Preflight", extract: "Extract corpus", design_render: "Render design",
       design_approve: "Approve Gate A", design_reject: "Reject Gate A", generate: "Generate code",
       verify: "Verify", delivery_render: "Render delivery",
       delivery_approve: "Approve Gate B", delivery_reject: "Reject Gate B",
     },
     ui: {
-      workspaces: "Workspaces", hint_pre: "Run", hint_post: " to create a workspace",
+      workspaces: "Workspaces",
       empty_pick: "Pick a workspace on the left to see progress and history",
       th_stage: "Stage", th_name: "Name", th_status: "Status", th_hash: "Artifact hash", th_gate: "Gate",
       history: "Build history",
       note_placeholder: "Rejection reason (required for reject actions)",
-      not_init: "Pipeline not initialized: click Init below or run icewright pipeline init",
+      not_init: "Pipeline not initialized: click Init below to start",
       stage_now: "current stage", updated: "updated",
       arm: "Click again to confirm",
       executing: "{0} running…",
@@ -138,10 +164,36 @@ var DICT = {
       ws_created: "Workspace {0} created: select it and click Init to start the pipeline",
       ws_empty_id: "Enter a workspace id",
       aside_toggle: "Collapse / expand sidebar",
+      tab_flow: "Flow",
+      tab_corpus: "Requirement corpus",
+      tab_output: "Generated project",
+      open_in_folder: "Open in folder",
+      corpus_files: "Corpus files",
+      corpus_name_ph: "File name (e.g. refund.md)",
+      corpus_add: "Add",
+      corpus_edit_ph: "Write or paste requirement text here (markdown / plain text)",
+      corpus_save: "Save corpus",
+      output_files: "Generated files",
+      output_edit_ph: "Pick a file on the left to view; edit directly and save",
+      output_save: "Save edits",
+      pick_file: "Pick a file on the left to view and edit",
+      no_corpus: "No corpus yet: choose a category and add a file below",
+      no_output: "Nothing generated yet: run through \"Generate code\" in the Flow tab",
+      saved: "Saved {0}",
+      corpus_added: "Created {0}; edit it and remember to save",
+      corpus_exists: "That corpus file already exists - open it from the list",
+      corpus_empty_name: "Enter a file name",
+      unsaved_first: "Unsaved changes: save first",
+      output_saved: "Saved {0} (note: S8 regeneration may overwrite manual edits)",
+      open_dir_fail: "Could not open folder: {0}",
       err_base: "Base URL must start with http(s)://",
       err_model: "Model name is required",
       err_key: "Invalid key reference (re-enter if it shows a mask)",
       err_no_key: "No key environment variable found: set a key reference or export the variable first",
+      err_need_init: "Pipeline not initialized: click Init in the Flow tab first",
+      err_s2_not_approved: "S2 preflight not approved: run Preflight in the Flow tab first",
+      err_rel: "Invalid file path (corpus must be \"category/file\", no .. or absolute paths)",
+      err_big: "File exceeds the 4 MB limit",
     },
   },
 };
@@ -186,6 +238,9 @@ function fmt(tpl, args) {
 function applyStatic() {
   document.querySelectorAll("[data-i18n]").forEach(function (el) {
     el.textContent = U(el.getAttribute("data-i18n"));
+  });
+  document.querySelectorAll("[data-i18n-ph]").forEach(function (el) {
+    el.placeholder = U(el.getAttribute("data-i18n-ph"));
   });
   $("op-note").placeholder = U("note_placeholder");
   $("ws-new-id").placeholder = U("ws_id_ph");
@@ -329,6 +384,7 @@ function renderStatus(st) {
 var OPS = [
   { op: "init", need: function (st) { return !st; } },
   { op: "preflight", need: function (st) { return !!st; } },
+  { op: "extract", need: function (st) { return statusOf(st, "S2") === "approved" && statusOf(st, "S3") !== "approved"; } },
   { op: "design_render", need: function (st) { return statusOf(st, "S3") === "approved"; } },
   { op: "design_approve", confirm: true, need: function (st) { return statusOf(st, "S4") === "waiting_gate"; } },
   { op: "design_reject", note: true, need: function (st) { return statusOf(st, "S4") === "waiting_gate"; } },
@@ -403,7 +459,7 @@ async function runOp(spec) {
     res.textContent = "✔ " + label + "\n" + out;
     $("op-note").value = "";
   } catch (err) {
-    res.textContent = "✘ " + label + "\n" + err;
+    res.textContent = "✘ " + label + "\n" + setErr(err);
   }
   busy = false;
   await refresh();
@@ -444,8 +500,203 @@ async function renderHistory() {
   });
 }
 
+/* ---------- 明细标签：流程 / 需求语料 / 生成项目 ---------- */
+var view = "flow";
+function showViewTab(v) {
+  view = v;
+  ["flow", "corpus", "output"].forEach(function (k) {
+    $("vtab-" + k).classList.toggle("active", k === v);
+    $("vpane-" + k).classList.toggle("hidden", k !== v);
+  });
+  if (v === "corpus") { loadCorpus(); }
+  else if (v === "output") { loadOutput(); }
+}
+
+/* ---------- 需求语料 / 生成项目：文件可看可改 ---------- */
+var lastWs = null;              // 切换工作区时重置编辑区状态
+var corpusRel = null, corpusBase = "";
+var outRel = null, outBase = "";
+var catsLoaded = false;
+
+function panelStatus(id, msg) { $(id).textContent = msg; }
+
+function renderFileList(ulId, files, curRel, openFn, emptyMsg) {
+  var ul = $(ulId);
+  ul.innerHTML = "";
+  if (!files.length) {
+    ul.innerHTML = "<li class='hint'>" + esc(emptyMsg) + "</li>";
+    return;
+  }
+  files.forEach(function (f) {
+    var li = document.createElement("li");
+    li.textContent = f.rel;
+    li.title = f.rel + " · " + f.bytes + " B";
+    li.className = f.rel === curRel ? "active" : "";
+    li.onclick = function () { openFn(f.rel); };
+    ul.appendChild(li);
+  });
+}
+
+function markActive(ulId, rel) {
+  Array.prototype.forEach.call($(ulId).children, function (li) {
+    li.classList.toggle("active", li.textContent === rel);
+  });
+}
+
+function resetPanes() {
+  corpusRel = null; corpusBase = "";
+  outRel = null; outBase = "";
+  ["corpus", "output"].forEach(function (k) {
+    $(k + "-editor").value = "";
+    $(k + "-edit-head").textContent = U("pick_file");
+    $(k + "-save").disabled = true;
+    panelStatus(k + "-status", "");
+  });
+}
+
+function corpusDirty() { return corpusRel !== null && $("corpus-editor").value !== corpusBase; }
+function outputDirty() { return outRel !== null && $("output-editor").value !== outBase; }
+
+async function loadCorpus() {
+  if (!selected) { return; }
+  try {
+    var paths = await invoke("ws_paths", { wsId: selected });
+    $("corpus-dir").textContent = paths.corpus;
+    if (!catsLoaded) {
+      var cats = await invoke("corpus_cats");
+      var sel = $("corpus-cat");
+      sel.innerHTML = "";
+      cats.forEach(function (c) {
+        var o = document.createElement("option");
+        o.value = c; o.textContent = c;
+        sel.appendChild(o);
+      });
+      catsLoaded = true;
+    }
+    var files = await invoke("corpus_list", { wsId: selected });
+    $("corpus-count").textContent = String(files.length);
+    renderFileList("corpus-list", files, corpusRel, openCorpus, U("no_corpus"));
+    if (corpusRel && !files.some(function (f) { return f.rel === corpusRel; })) {
+      corpusRel = null;
+      $("corpus-save").disabled = true;
+      $("corpus-editor").value = "";
+      $("corpus-edit-head").textContent = U("pick_file");
+    }
+  } catch (err) {
+    panelStatus("corpus-status", "✘ " + setErr(err));
+  }
+}
+
+async function openCorpus(rel) {
+  if (corpusDirty()) { panelStatus("corpus-status", "✘ " + U("unsaved_first")); return; }
+  try {
+    var text = await invoke("corpus_read", { wsId: selected, rel: rel });
+    corpusRel = rel; corpusBase = text;
+    $("corpus-editor").value = text;
+    $("corpus-edit-head").textContent = rel;
+    $("corpus-save").disabled = false;
+    panelStatus("corpus-status", "");
+    markActive("corpus-list", rel);
+    $("corpus-editor").focus();
+  } catch (err) { panelStatus("corpus-status", "✘ " + setErr(err)); }
+}
+
+function addCorpus() {
+  if (!selected) { panelStatus("corpus-status", "✘ " + U("set_pick_ws")); return; }
+  if (corpusDirty()) { panelStatus("corpus-status", "✘ " + U("unsaved_first")); return; }
+  var name = $("corpus-name").value.trim();
+  if (!name) { panelStatus("corpus-status", "✘ " + U("corpus_empty_name")); return; }
+  var rel = $("corpus-cat").value + "/" + name;
+  var exists = Array.prototype.some.call($("corpus-list").children, function (li) {
+    return li.textContent === rel;
+  });
+  if (exists) { panelStatus("corpus-status", "✘ " + U("corpus_exists")); return; }
+  invoke("corpus_save", { wsId: selected, rel: rel, content: "" })
+    .then(function () { $("corpus-name").value = ""; return loadCorpus(); })
+    .then(function () { return openCorpus(rel); })
+    .then(function () { panelStatus("corpus-status", "✔ " + fmt(U("corpus_added"), [rel])); })
+    .catch(function (err) { panelStatus("corpus-status", "✘ " + setErr(err)); });
+}
+
+function saveCorpus() {
+  if (!corpusRel) { return; }
+  invoke("corpus_save", { wsId: selected, rel: corpusRel, content: $("corpus-editor").value })
+    .then(function () {
+      corpusBase = $("corpus-editor").value;
+      panelStatus("corpus-status", "✔ " + fmt(U("saved"), [corpusRel]));
+      return loadCorpus();
+    })
+    .catch(function (err) { panelStatus("corpus-status", "✘ " + setErr(err)); });
+}
+
+async function loadOutput() {
+  if (!selected) { return; }
+  try {
+    var paths = await invoke("ws_paths", { wsId: selected });
+    $("output-dir").textContent = paths.output;
+    var files = await invoke("output_list", { wsId: selected });
+    $("output-count").textContent = String(files.length);
+    renderFileList("output-list", files, outRel, openOutput, U("no_output"));
+    if (outRel && !files.some(function (f) { return f.rel === outRel; })) {
+      outRel = null;
+      $("output-save").disabled = true;
+      $("output-editor").value = "";
+      $("output-edit-head").textContent = U("pick_file");
+    }
+  } catch (err) {
+    panelStatus("output-status", "✘ " + setErr(err));
+  }
+}
+
+async function openOutput(rel) {
+  if (outputDirty()) { panelStatus("output-status", "✘ " + U("unsaved_first")); return; }
+  try {
+    var text = await invoke("output_read", { wsId: selected, rel: rel });
+    outRel = rel; outBase = text;
+    $("output-editor").value = text;
+    $("output-edit-head").textContent = rel;
+    $("output-save").disabled = false;
+    panelStatus("output-status", "");
+    markActive("output-list", rel);
+    $("output-editor").focus();
+  } catch (err) { panelStatus("output-status", "✘ " + setErr(err)); }
+}
+
+function saveOutput() {
+  if (!outRel) { return; }
+  invoke("output_save", { wsId: selected, rel: outRel, content: $("output-editor").value })
+    .then(function () {
+      outBase = $("output-editor").value;
+      panelStatus("output-status", "✔ " + fmt(U("output_saved"), [outRel]));
+      return loadOutput();
+    })
+    .catch(function (err) { panelStatus("output-status", "✘ " + setErr(err)); });
+}
+
+function openDir(cmd, statusId) {
+  if (!selected) { panelStatus(statusId, "✘ " + U("set_pick_ws")); return; }
+  invoke(cmd, { wsId: selected })
+    .then(function () { panelStatus(statusId, ""); })
+    .catch(function (err) { panelStatus(statusId, "✘ " + fmt(U("open_dir_fail"), [err])); });
+}
+
+function initViewTabs() {
+  ["flow", "corpus", "output"].forEach(function (k) {
+    $("vtab-" + k).onclick = function () { showViewTab(k); };
+  });
+  $("corpus-add").onclick = addCorpus;
+  $("corpus-name").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { addCorpus(); }
+  });
+  $("corpus-save").onclick = saveCorpus;
+  $("corpus-open").onclick = function () { openDir("open_corpus_dir", "corpus-status"); };
+  $("output-save").onclick = saveOutput;
+  $("output-open").onclick = function () { openDir("open_output_dir", "output-status"); };
+}
+
 async function refresh() {
   if (!selected) { return; }
+  if (selected !== lastWs) { lastWs = selected; resetPanes(); }
   var loc = await invoke("ws_locale", { wsId: selected });
   var next = langPref || (String(loc).trim().toLowerCase() === "en" ? "en" : "zh");
   if (next !== lang) {
@@ -461,6 +712,8 @@ async function refresh() {
   renderStatus(st);
   renderActions(st);
   await renderHistory();
+  if (view === "corpus") { await loadCorpus(); }
+  else if (view === "output") { await loadOutput(); }
 }
 
 async function tick() {
@@ -504,6 +757,10 @@ function setErr(err) {
     invalid_model: "err_model",
     invalid_key_ref: "err_key",
     no_key_env: "err_no_key",
+    need_init: "err_need_init",
+    s2_not_approved: "err_s2_not_approved",
+    invalid_rel: "err_rel",
+    file_too_large: "err_big",
   };
   var key = map[String(err)];
   return key ? U(key) : String(err);
@@ -693,6 +950,7 @@ function initMenuEvents() {
 initLangToggle();
 initAside();
 initWsCreate();
+initViewTabs();
 initActions();
 initAbout();
 initSettings();

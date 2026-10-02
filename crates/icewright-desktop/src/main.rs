@@ -198,6 +198,61 @@ fn pipeline_status(ws_id: String) -> Result<Option<state::PipelineState>, String
         .map_err(|e| e.to_string())
 }
 
+/* ---------- 需求语料与生成物（corpus/ 与 output/）：GUI 内查看编辑，无需回命令行 ---------- */
+#[tauri::command]
+fn ws_paths(ws_id: String) -> Result<ops::WorkspacePaths, String> {
+    ops::ws_paths(&ws_id)
+}
+
+#[tauri::command]
+fn corpus_list(ws_id: String) -> Result<Vec<ops::WsFile>, String> {
+    ops::corpus_list(&ws_id)
+}
+
+#[tauri::command]
+fn corpus_read(ws_id: String, rel: String) -> Result<String, String> {
+    ops::corpus_read(&ws_id, &rel)
+}
+
+#[tauri::command]
+fn corpus_save(ws_id: String, rel: String, content: String) -> Result<String, String> {
+    ops::corpus_save(&ws_id, &rel, &content)
+}
+
+#[tauri::command]
+fn corpus_cats() -> Vec<&'static str> {
+    ops::CORPUS_CATS.to_vec()
+}
+
+#[tauri::command]
+fn output_list(ws_id: String) -> Result<Vec<ops::WsFile>, String> {
+    ops::output_list(&ws_id)
+}
+
+#[tauri::command]
+fn output_read(ws_id: String, rel: String) -> Result<String, String> {
+    ops::output_read(&ws_id, &rel)
+}
+
+#[tauri::command]
+fn output_save(ws_id: String, rel: String, content: String) -> Result<String, String> {
+    ops::output_save(&ws_id, &rel, &content)
+}
+
+/// 在系统文件管理器中打开生成物目录（失败回传前端明示，不静默）。
+#[tauri::command]
+fn open_output_dir(ws_id: String) -> Result<(), String> {
+    let paths = ops::ws_paths(&ws_id)?;
+    open_url(&paths.output)
+}
+
+/// 在系统文件管理器中打开语料目录。
+#[tauri::command]
+fn open_corpus_dir(ws_id: String) -> Result<(), String> {
+    let paths = ops::ws_paths(&ws_id)?;
+    open_url(&paths.corpus)
+}
+
 #[tauri::command]
 fn history_tail(ws_id: String, n: u32) -> Result<Vec<history::Event>, String> {
     let ws = Workspace::open(&ws_id).map_err(|e| e.to_string())?;
@@ -342,6 +397,16 @@ fn main() {
             ws_list,
             ws_create,
             pipeline_status,
+            ws_paths,
+            corpus_list,
+            corpus_read,
+            corpus_save,
+            corpus_cats,
+            output_list,
+            output_read,
+            output_save,
+            open_output_dir,
+            open_corpus_dir,
             history_tail,
             app_version,
             ws_locale,
