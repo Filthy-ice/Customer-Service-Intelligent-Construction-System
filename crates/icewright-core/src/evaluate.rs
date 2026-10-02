@@ -1,6 +1,7 @@
 //! 评测回放：对运行中的生成系统执行 eval-cases 契约用例。
 //! 确定性断言即时判定；语义/裁判类断言经 LLM 裁判判定（不可判时记 deferred，不计红线）。
 use crate::extract::{CallOutcome, RULES_ARTIFACT};
+use crate::i18n::ModelLang;
 use crate::model::ChatMessage;
 use crate::secrets;
 use crate::state::{self, StageId, StageStatus, StageUsage};
@@ -235,25 +236,43 @@ fn check_assertions(
 }
 
 /// 裁判提示词：一次一条断言，强制单行 JSON 结论
-pub fn judge_prompt(sc: &SemanticCheck, transcript: &str) -> Vec<ChatMessage> {
+pub fn judge_prompt(sc: &SemanticCheck, transcript: &str, lang: ModelLang) -> Vec<ChatMessage> {
     let direction = match sc.mode {
-        SemanticMode::Violation => "回复【不得命中】下述判分依据；pass=true 表示未命中（合格）",
-        SemanticMode::Conformance => {
-            "回复【应当符合】下述判分依据；pass 表示符合程度达标，score 为 0~1 符合度"
-        }
+        SemanticMode::Violation => lang.pick(
+            "回复【不得命中】下述判分依据；pass=true 表示未命中（合格）",
+            "The reply must NOT hit the scoring criterion below; pass=true means it did not hit (compliant)",
+        ),
+        SemanticMode::Conformance => lang.pick(
+            "回复【应当符合】下述判分依据；pass 表示符合程度达标，score 为 0~1 符合度",
+            "The reply should conform to the scoring criterion below; pass means it meets the bar, score is a 0~1 conformance degree",
+        ),
     };
     let threshold = sc
         .threshold
-        .map(|t| format!("，达标线 score ≥ {t}"))
+        .map(|t| {
+            lang.pick(
+                &format!("，达标线 score ≥ {t}"),
+                &format!(", passing bar score >= {t}"),
+            )
+            .to_string()
+        })
         .unwrap_or_default();
     vec![
-        ChatMessage::system(
+        ChatMessage::system(lang.pick(
             "你是智能客服质检裁判。只依据给定回复文本裁决，不做主观脑补，不引入额外标准。\
              只输出一行 JSON（无其他文字）：{\"pass\":true|false,\"score\":0.0~1.0,\"reason\":\"一句话依据\"}\
              。pass 一律表示\"合格\"。",
-        ),
+            "You are a customer-service QA judge. Rule only on the given reply text, no subjective \
+             mind-reading, no extra standards. Output a single line of JSON (no other text): \
+             {\"pass\":true|false,\"score\":0.0~1.0,\"reason\":\"one-sentence basis\"}. \
+             pass always means \"compliant\".",
+        )),
         ChatMessage::user(&format!(
-            "【判定方向】{direction}{threshold}\n【判分依据】{}\n【客服回复（按轮次）】\n{transcript}\n请裁决。",
+            "{}{direction}{threshold}\n{}{}\n{}\n{transcript}\n{}",
+            lang.pick("【判定方向】", "[Judgment direction] "),
+            lang.pick("【判分依据】", "[Scoring criterion] "),
+            lang.pick("【客服回复（按轮次）】", "[Agent replies (by turn)]"),
+            lang.pick("请裁决。", "Please rule."),
             sc.criterion
         )),
     ]
@@ -354,6 +373,7 @@ pub fn evaluate<J: FnMut(&[ChatMessage]) -> Result<CallOutcome>>(
         bail!("{}", t!("eval_contract_violation", format!("{errors:?}")));
     }
     let rules = rule_texts(ws);
+    let jlang = ModelLang::resolve(&ws.config()?.workspace.model_lang);
     let cases = suite["cases"].as_array().cloned().unwrap_or_default();
     let mut outcomes = Vec::new();
     let mut j_calls = 0u32;
@@ -394,7 +414,7 @@ pub fn evaluate<J: FnMut(&[ChatMessage]) -> Result<CallOutcome>>(
         // 语义断言逐条走 LLM 裁判；不可判的退回 deferred 计数
         for sc in std::mem::take(&mut verdict.semantic) {
             let transcript = replies.join("\n");
-            let call = judge(&judge_prompt(&sc, &transcript));
+            let call = judge(&judge_prompt(&sc, &transcript, jlang));
             let outcome = match call {
                 Ok(o) => o,
                 Err(_) => {
@@ -678,7 +698,7 @@ mod tests {
             mode: SemanticMode::Violation,
             threshold: None,
         };
-        let msgs = judge_prompt(&sc, "客服：好的");
+        let msgs = judge_prompt(&sc, "客服：好的", ModelLang::Zh);
         assert_eq!(msgs.len(), 2);
         assert!(msgs[1].content.contains("禁止使用肯定赔字样"));
         assert!(msgs[1].content.contains("不得命中"));

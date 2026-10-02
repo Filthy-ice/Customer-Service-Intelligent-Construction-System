@@ -1,3 +1,4 @@
+use crate::i18n::ModelLang;
 use crate::model::ChatMessage;
 use crate::state::{self, PipelineState, StageId, StageStatus};
 use crate::t;
@@ -140,59 +141,122 @@ impl Kind {
     }
 
     /// 各类提取提示：契约即 schema 文本，模型只允许输出该形状的 JSON。
-    fn system_prompt(self) -> Result<String> {
+    /// 语种跟随客户在需求摄入时选定的模型操作语言（workspace.model_lang）。
+    fn system_prompt(self, lang: ModelLang) -> Result<String> {
         let schema = icewright_artifact::schema_src(self.contract())?;
         let (role, duties) = match self {
             Kind::Apis => (
-                "外部核心系统接口契约提取器",
-                "1. 每个接口 id 形如 API-<域>-<含义>；鉴权只写 keyring:// 引用，绝不把凭证写进产物。\n\
-                 2. response.fields 每项的 dict_field 为 FLD-* id，仅允许 ASCII（^FLD-[A-Za-z0-9_-]+$，如 FLD-claim_status），用于衔接数据字典。\n\
-                 3. mock_examples 至少给出一个成功场景，供离线评测。\n\
-                 4. confirmed_by_customer 一律输出 false——接口真实存在与否由人工在闸门A确认，模型无权确认。",
+                lang.pick(
+                    "外部核心系统接口契约提取器",
+                    "external core-system API contract extractor",
+                ),
+                lang.pick(
+                    "1. 每个接口 id 形如 API-<域>-<含义>；鉴权只写 keyring:// 引用，绝不把凭证写进产物。\n\
+                     2. response.fields 每项的 dict_field 为 FLD-* id，仅允许 ASCII（^FLD-[A-Za-z0-9_-]+$，如 FLD-claim_status），用于衔接数据字典。\n\
+                     3. mock_examples 至少给出一个成功场景，供离线评测。\n\
+                     4. confirmed_by_customer 一律输出 false——接口真实存在与否由人工在闸门A确认，模型无权确认。",
+                    "1. Each API id takes the form API-<domain>-<meaning>; auth must only carry a keyring:// reference — never write credentials into the artifact.\n\
+                     2. In response.fields, every item's dict_field is an FLD-* id, ASCII only (^FLD-[A-Za-z0-9_-]+$, e.g. FLD-claim_status), used to link into the data dictionary.\n\
+                     3. mock_examples must include at least one success scenario for offline evaluation.\n\
+                     4. confirmed_by_customer must always be output as false — whether an API truly exists is confirmed by humans at Gate A; the model has no authority to confirm.",
+                ),
             ),
             Kind::Flows => (
-                "对话流程 DSL 提取器",
-                "1. flow id 形如 F-<域>；transitions.to 必须指向同一流程内已有的状态 id。\n\
-                 2. 转移条件 on 只允许引用本流程槽位名、保留字 true 或 slots_complete(F-xxx)；\
-                 驱动规则用 rule_ref 回填 R-*，语料没有依据就不要写。\n\
-                 3. collect 动作的 ref 必须是本流程槽位名；script/skill_call 的 ref 分别为 S-*/SK-*。\n\
-                 4. 不臆造语料未提及的流程、状态或槽位。",
+                lang.pick(
+                    "对话流程 DSL 提取器",
+                    "dialogue-flow DSL extractor",
+                ),
+                lang.pick(
+                    "1. flow id 形如 F-<域>；transitions.to 必须指向同一流程内已有的状态 id。\n\
+                     2. 转移条件 on 只允许引用本流程槽位名、保留字 true 或 slots_complete(F-xxx)；\
+                     驱动规则用 rule_ref 回填 R-*，语料没有依据就不要写。\n\
+                     3. collect 动作的 ref 必须是本流程槽位名；script/skill_call 的 ref 分别为 S-*/SK-*。\n\
+                     4. 不臆造语料未提及的流程、状态或槽位。",
+                    "1. Flow id takes the form F-<domain>; transitions.to must point to a state id already existing in the same flow.\n\
+                     2. Transition condition on may only reference this flow's slot names, the literal true, or slots_complete(F-xxx);\n\
+                     driving rules are backfilled via rule_ref as R-* — omit rule_ref unless the corpus supports it.\n\
+                     3. A collect action's ref must be a slot name of this flow; script/skill_call refs are S-*/SK-* respectively.\n\
+                     4. Never invent flows, states, or slots not mentioned in the corpus.",
+                ),
             ),
             Kind::Dictionary => (
-                "数据字段字典提取器",
-                "1. 字段 id 形如 FLD-<名称>，这是规则条件与流程分支唯一允许引用的 id 全集。\n\
-                 2. source.kind ∈ api/session_slot/derived：api.ref 必须是 API-*；\
-                 session_slot.ref 必须是 F-* 并带 slot；derived 必须给 expr 和 depends_on（全部为 FLD-*）。\n\
-                 3. 语料与接口示例中未出现的字段不要发明；来源无法确定就不要写该字段。\n\
-                 4. 涉及个人信息（证件号、电话等）的字段必须标 pii=masked 或 secret。",
+                lang.pick(
+                    "数据字段字典提取器",
+                    "data-field dictionary extractor",
+                ),
+                lang.pick(
+                    "1. 字段 id 形如 FLD-<名称>，这是规则条件与流程分支唯一允许引用的 id 全集。\n\
+                     2. source.kind ∈ api/session_slot/derived：api.ref 必须是 API-*；\
+                     session_slot.ref 必须是 F-* 并带 slot；derived 必须给 expr 和 depends_on（全部为 FLD-*）。\n\
+                     3. 语料与接口示例中未出现的字段不要发明；来源无法确定就不要写该字段。\n\
+                     4. 涉及个人信息（证件号、电话等）的字段必须标 pii=masked 或 secret。",
+                    "1. Field id takes the form FLD-<name>; this is the only id space that rule conditions and flow branches may reference.\n\
+                     2. source.kind ∈ api/session_slot/derived: api.ref must be API-*;\n\
+                     session_slot.ref must be F-* plus a slot; derived must give expr and depends_on (all FLD-*).\n\
+                     3. Do not invent fields absent from the corpus and the API examples; if the source cannot be determined, leave the field out.\n\
+                     4. Fields involving personal information (ID numbers, phone numbers, etc.) must be marked pii=masked or secret.",
+                ),
             ),
             Kind::Rules => (
-                "行业规则提取器",
-                "1. 每条规则必须含 enforcement_point；无法机器执行的用 \"none\"（降级为文档条目，不编造执行点）。\n\
-                 2. 条件表达式只能引用语料中明确出现或可派生的字段；引用不到就不要写该条件。\n\
-                 3. 不臆造金额、时限、比例等数字；语料未给出就不要发明。\n\
-                 4. id 形如 R-<域前缀>-<四位数字>，全局唯一。",
+                lang.pick(
+                    "行业规则提取器",
+                    "industry-rule extractor",
+                ),
+                lang.pick(
+                    "1. 每条规则必须含 enforcement_point；无法机器执行的用 \"none\"（降级为文档条目，不编造执行点）。\n\
+                     2. 条件表达式只能引用语料中明确出现或可派生的字段；引用不到就不要写该条件。\n\
+                     3. 不臆造金额、时限、比例等数字；语料未给出就不要发明。\n\
+                     4. id 形如 R-<域前缀>-<四位数字>，全局唯一。",
+                    "1. Every rule must carry enforcement_point; rules not machine-executable use \"none\" (degrade to a documentation entry, never fabricate an enforcement point).\n\
+                     2. Condition expressions may only reference fields explicitly present in or derivable from the corpus; if unresolvable, omit that condition.\n\
+                     3. Never fabricate amounts, deadlines, ratios or other numbers; if the corpus does not give them, leave them out.\n\
+                     4. id takes the form R-<domain-prefix>-<four digits>, globally unique.",
+                ),
             ),
             Kind::Skills => (
-                "技能绑定提取器",
-                "1. skill id 形如 SK-<域>-<含义>；intents 为语料对话场景归纳的意图标签（英文小写下划线）。\n\
-                 2. capability.kind 只允许 flow/api_call/api_chain/script/rag_query：\
-                 flow 的 ref 必须是白名单内的 F-*；api_call 的 ref 必须是白名单内的 API-*；\
-                 api_chain 的 ref 按调用顺序以英文逗号连接多个白名单 API-*；script/rag_query 的 ref 不做白名单约束。\n\
-                 3. required_fields、preconditions 中出现的 FLD-*、input_map/output_map 值里的 FLD-*，\
-                 一律只允许字典白名单内已定义的字段，不得引用未定义字段。\n\
-                 4. rule_refs 只列确实作用于本技能的白名单 R-*；没有依据就不写。\n\
-                 5. status 一律输出 pending——技能是否生效由人工在闸门A确认，模型无权确认。\n\
-                 6. 客户给的技能/话术描述只是意图归纳的参考，不得照抄为规范：\
-                 每条 intent 必须写成能约束 agent 的口径——明确触发条件、适用边界与不应触发的反例。",
+                lang.pick(
+                    "技能绑定提取器",
+                    "skill-binding extractor",
+                ),
+                lang.pick(
+                    "1. skill id 形如 SK-<域>-<含义>；intents 为语料对话场景归纳的意图标签（英文小写下划线）。\n\
+                     2. capability.kind 只允许 flow/api_call/api_chain/script/rag_query：\
+                     flow 的 ref 必须是白名单内的 F-*；api_call 的 ref 必须是白名单内的 API-*；\
+                     api_chain 的 ref 按调用顺序以英文逗号连接多个白名单 API-*；script/rag_query 的 ref 不做白名单约束。\n\
+                     3. required_fields、preconditions 中出现的 FLD-*、input_map/output_map 值里的 FLD-*，\
+                     一律只允许字典白名单内已定义的字段，不得引用未定义字段。\n\
+                     4. rule_refs 只列确实作用于本技能的白名单 R-*；没有依据就不写。\n\
+                     5. status 一律输出 pending——技能是否生效由人工在闸门A确认，模型无权确认。\n\
+                     6. 客户给的技能/话术描述只是意图归纳的参考，不得照抄为规范：\
+                     每条 intent 必须写成能约束 agent 的口径——明确触发条件、适用边界与不应触发的反例。",
+                    "1. Skill id takes the form SK-<domain>-<meaning>; intents are intent labels distilled from the corpus's dialogue scenarios (lowercase ASCII with underscores).\n\
+                     2. capability.kind allows only flow/api_call/api_chain/script/rag_query:\n\
+                     a flow ref must be a whitelisted F-*; an api_call ref a whitelisted API-*;\n\
+                     an api_chain ref joins several whitelisted API-* in call order, comma-separated; script/rag_query refs are not whitelist-constrained.\n\
+                     3. Every FLD-* appearing in required_fields, in preconditions, or as an input_map/output_map value\n\
+                     must be a field already defined in the dictionary whitelist — undefined fields must not be referenced.\n\
+                     4. rule_refs lists only whitelisted R-* that genuinely apply to this skill; omit them without evidence.\n\
+                     5. status must always be output as pending — whether a skill takes effect is confirmed by humans at Gate A; the model has no authority to confirm.\n\
+                     6. Customer-provided skill/script descriptions are only reference material for intent distillation and must never be copied verbatim as specification:\n\
+                     every intent must be phrased so it constrains the agent — explicit trigger conditions, applicable boundaries, and counter-examples where it must not fire.",
+                ),
             ),
         };
-        Ok(format!(
-            "你是 IceWright 的{role}。阅读用户提供的行业语料，提取全部对应领域产物，\n\
-             只输出一个 JSON 对象，严格符合以下 JSON Schema（draft 2020-12）：\n\
-             {schema}\n\
-             硬性要求：\n{duties}"
-        ))
+        Ok(lang.pick(
+            &format!(
+                "你是 IceWright 的{role}。阅读用户提供的行业语料，提取全部对应领域产物，\n\
+                 只输出一个 JSON 对象，严格符合以下 JSON Schema（draft 2020-12）：\n\
+                 {schema}\n\
+                 硬性要求：\n{duties}"
+            ),
+            &format!(
+                "You are IceWright's {role}. Read the industry corpus provided by the user and extract all corresponding domain artifacts,\n\
+                 outputting exactly one JSON object strictly conforming to the following JSON Schema (draft 2020-12):\n\
+                 {schema}\n\
+                 Hard requirements:\n{duties}"
+            ),
+        )
+        .to_string())
     }
 }
 
@@ -220,6 +284,28 @@ pub fn parse_and_validate(kind: Kind, raw: &str) -> std::result::Result<Value, V
     }
 }
 
+/// 修复回环回喂消息：按客户选定的模型操作语言出稿。
+fn repair_message(lang: ModelLang, contract: &str, errs: &[String]) -> String {
+    let joined = errs.join("\n");
+    let zh = format!(
+        "你上一次的输出未通过 {contract} 契约校验，错误如下：\n{joined}\n\
+         请修正后重新输出完整 JSON（只输出 JSON，不要解释）。"
+    );
+    let en = format!(
+        "Your previous output failed the {contract} contract validation. Errors:\n{joined}\n\
+         Fix them and re-output the complete JSON (output JSON only, no explanation)."
+    );
+    lang.pick(&zh, &en).to_string()
+}
+
+/// 白名单标题：约束跨产物引用只能用已确定 id。
+fn whitelist_header(lang: ModelLang) -> &'static str {
+    lang.pick(
+        "【已确定的引用 id 白名单——引用时只允许使用下列 id，不得发明白名单外的 id】",
+        "[Confirmed reference id whitelist - you may only cite the ids listed below; never invent ids outside this whitelist]",
+    )
+}
+
 /// 校验-修复回环：最多 max_repairs 次把错误清单回喂模型重生成。
 /// known_ids 非空时作为白名单附加进用户消息，约束跨产物引用。
 /// 返回值同时带回本轮全部模型调用的用量账（含失败重试）。
@@ -228,6 +314,7 @@ pub fn extract_artifact<F>(
     corpus: &str,
     known_ids: &str,
     max_repairs: u32,
+    lang: ModelLang,
     mut chat: F,
 ) -> Result<(Value, RunUsage)>
 where
@@ -236,12 +323,10 @@ where
     let user = if known_ids.trim().is_empty() {
         corpus.to_string()
     } else {
-        format!(
-            "{corpus}\n\n【已确定的引用 id 白名单——引用时只允许使用下列 id，不得发明白名单外的 id】\n{known_ids}"
-        )
+        format!("{corpus}\n\n{}\n{known_ids}", whitelist_header(lang))
     };
     let mut messages = vec![
-        ChatMessage::system(&kind.system_prompt()?),
+        ChatMessage::system(&kind.system_prompt(lang)?),
         ChatMessage::user(&user),
     ];
     let mut last_errs = Vec::new();
@@ -257,11 +342,10 @@ where
                     role: "assistant".into(),
                     content: out.content,
                 });
-                messages.push(ChatMessage::user(&format!(
-                    "你上一次的输出未通过 {} 契约校验，错误如下：\n{}\n\
-                     请修正后重新输出完整 JSON（只输出 JSON，不要解释）。",
+                messages.push(ChatMessage::user(&repair_message(
+                    lang,
                     kind.contract(),
-                    errs.join("\n")
+                    &errs,
                 )));
             }
         }
@@ -320,7 +404,7 @@ pub fn corpus_images(ws_root: &Path) -> Result<Vec<std::path::PathBuf>> {
 
 /// 读取 corpus/ 全部文本文件（递归，含子目录分类），按相对路径排序，带字节上限。
 /// 图片语料跳过（走 corpus_images 留档），不阻断文本提取。
-pub fn load_corpus(ws_root: &Path) -> Result<String> {
+pub fn load_corpus(ws_root: &Path, lang: ModelLang) -> Result<String> {
     let dir = ws_root.join("corpus");
     let files = corpus_files(ws_root)?;
     let mut total = 0u64;
@@ -344,7 +428,10 @@ pub fn load_corpus(ws_root: &Path) -> Result<String> {
         let rel = p.strip_prefix(&dir).unwrap_or(&p).display();
         let text =
             std::fs::read_to_string(&p).with_context(|| t!("corpus_not_text", p.display()))?;
-        out.push_str(&format!("\n\n## 文件: {rel}\n{text}"));
+        out.push_str(&format!(
+            "\n\n{}{rel}\n{text}",
+            lang.pick("## 文件: ", "## File: ")
+        ));
     }
     if out.trim().is_empty() {
         bail!("{}", t!("corpus_empty"));
@@ -681,7 +768,7 @@ pub fn cross_check(
 }
 
 /// 收集"流程回填/动作引用了但规则侧未定义"的 R id（含出处），供定向补全回喂。
-fn dangling_rule_hints(flows: &Value, rules: &Value) -> Vec<String> {
+fn dangling_rule_hints(flows: &Value, rules: &Value, lang: ModelLang) -> Vec<String> {
     let defined = id_list(Some(rules), Kind::Rules);
     let mut hints: Vec<String> = Vec::new();
     let push = |h: String, hints: &mut Vec<String>| {
@@ -696,11 +783,13 @@ fn dangling_rule_hints(flows: &Value, rules: &Value) -> Vec<String> {
             for tr in arr_of(Some(s), "transitions") {
                 if let Some(r) = tr["rule_ref"].as_str() {
                     if !defined.iter().any(|x| x == r) {
+                        let on = tr["on"].as_str().unwrap_or("?");
                         push(
-                            format!(
-                                "{r} ← 流程 {fid}/{sid} 转移「{}」",
-                                tr["on"].as_str().unwrap_or("?")
-                            ),
+                            lang.pick(
+                                &format!("{r} ← 流程 {fid}/{sid} 转移「{on}」"),
+                                &format!("{r} <- flow {fid}/{sid} transition \"{on}\""),
+                            )
+                            .to_string(),
                             &mut hints,
                         );
                     }
@@ -709,11 +798,13 @@ fn dangling_rule_hints(flows: &Value, rules: &Value) -> Vec<String> {
             for a in arr_of(Some(s), "actions") {
                 if let Some(r) = a["rule_ref"].as_str() {
                     if !defined.iter().any(|x| x == r) {
+                        let ak = a["kind"].as_str().unwrap_or("?");
                         push(
-                            format!(
-                                "{r} ← 流程 {fid}/{sid} 的 {} 动作",
-                                a["kind"].as_str().unwrap_or("?")
-                            ),
+                            lang.pick(
+                                &format!("{r} ← 流程 {fid}/{sid} 的 {ak} 动作"),
+                                &format!("{r} <- {ak} action of flow {fid}/{sid}"),
+                            )
+                            .to_string(),
                             &mut hints,
                         );
                     }
@@ -725,7 +816,7 @@ fn dangling_rule_hints(flows: &Value, rules: &Value) -> Vec<String> {
 }
 
 /// 收集"流程 skill_call 引用了但技能侧未定义"的 SK id（含出处）。
-fn dangling_skill_hints(flows: &Value, skills: &Value) -> Vec<String> {
+fn dangling_skill_hints(flows: &Value, skills: &Value, lang: ModelLang) -> Vec<String> {
     let defined = id_list(Some(skills), Kind::Skills);
     let mut hints: Vec<String> = Vec::new();
     for flow in arr_of(Some(flows), "flows") {
@@ -736,7 +827,13 @@ fn dangling_skill_hints(flows: &Value, skills: &Value) -> Vec<String> {
                 if a["kind"].as_str() == Some("skill_call") {
                     if let Some(r) = a["ref"].as_str() {
                         if !defined.iter().any(|x| x == r) && !hints.contains(&r.to_string()) {
-                            hints.push(format!("{r} ← 流程 {fid}/{sid} 的 skill_call 动作"));
+                            hints.push(
+                                lang.pick(
+                                    &format!("{r} ← 流程 {fid}/{sid} 的 skill_call 动作"),
+                                    &format!("{r} <- skill_call action of flow {fid}/{sid}"),
+                                )
+                                .to_string(),
+                            );
                         }
                     }
                 }
@@ -866,12 +963,14 @@ pub fn record_s3(ws: &Workspace, corpus: &str, extracted: &[(Kind, Value)]) -> R
 
 /// 把"被流程引用但未定义"的 id 回喂给对应提取器定向补齐。
 /// 每轮允诺一次契约修复再问；补齐产物仍不过契约则维持原样，交由 cross_check 报错。
+#[allow(clippy::too_many_arguments)] // 回喂所需上下文：产物槽位、用量账与语言轴全部透传
 fn reconcile_dangling_ids<F>(
     k: Kind,
     hints: &[String],
     current: &mut [Option<Value>],
     extracted: &mut [(Kind, Value)],
     corpus: &str,
+    lang: ModelLang,
     chat: &mut F,
     usage: &mut RunUsage,
 ) -> Result<()>
@@ -886,29 +985,51 @@ where
     };
     let (label, instruction) = match k {
         Kind::Rules => (
-            "规则",
-            "请把上述被引用但未定义的规则逐个追加为条目：条目必须用左侧 R id 原样作为 id 值，\
-             type/statement/conditions 从引用出处合理归纳；归纳不出可靠条件时 \
-             enforcement_point 用 \"none\"、status 用 pending 作为文档条目兜底，不得改名或另造新 id；\
-             已有条目保持不变，只输出修正后的完整规则 JSON。",
+            lang.pick("规则", "rules"),
+            lang.pick(
+                "请把上述被引用但未定义的规则逐个追加为条目：条目必须用左侧 R id 原样作为 id 值，\
+                 type/statement/conditions 从引用出处合理归纳；归纳不出可靠条件时 \
+                 enforcement_point 用 \"none\"、status 用 pending 作为文档条目兜底，不得改名或另造新 id；\
+                 已有条目保持不变，只输出修正后的完整规则 JSON。",
+                "Append each referenced-but-undefined rule above as an entry: the entry must use \
+                 the left-side R id verbatim as its id value; infer type/statement/conditions \
+                 reasonably from the reference sites; when no reliable condition can be inferred, \
+                 fall back to enforcement_point \"none\" with status pending as a documentation \
+                 entry; never rename or invent new ids. Keep existing entries unchanged and output \
+                 only the corrected complete rules JSON.",
+            ),
         ),
         Kind::Skills => (
-            "技能",
-            "请把上述被引用但未定义的技能逐个追加为条目：条目必须用左侧 SK id 原样作为 id 值，\
-             capability 与字段从引用出处合理归纳，不得发明语料未出现的接口或字段，\
-             status 一律 pending，不得改名或另造新 id；已有条目保持不变，只输出修正后的完整技能 JSON。",
+            lang.pick("技能", "skills"),
+            lang.pick(
+                "请把上述被引用但未定义的技能逐个追加为条目：条目必须用左侧 SK id 原样作为 id 值，\
+                 capability 与字段从引用出处合理归纳，不得发明语料未出现的接口或字段，\
+                 status 一律 pending，不得改名或另造新 id；已有条目保持不变，只输出修正后的完整技能 JSON。",
+                "Append each referenced-but-undefined skill above as an entry: the entry must use \
+                 the left-side SK id verbatim as its id value; infer capability and fields reasonably \
+                 from the reference sites, never inventing APIs or fields absent from the corpus; \
+                 status is always pending; never rename or invent new ids. Keep existing entries \
+                 unchanged and output only the corrected complete skills JSON.",
+            ),
         ),
         _ => return Ok(()),
     };
+    let cur_section = if lang.is_en() {
+        format!("[Current extracted {label} JSON]")
+    } else {
+        format!("【当前已提取的{label} JSON】")
+    };
+    let id_section = lang.pick(
+        "【已被流程引用、但尚未定义的 id（每行：id ← 引用出处）】",
+        "[Ids referenced by flows but not yet defined (each line: id <- where referenced)]",
+    );
     let user = format!(
-        "{corpus}\n\n【当前已提取的{label} JSON】\n{}\n\
-         【已被流程引用、但尚未定义的 id（每行：id ← 引用出处）】\n{}\n\
-         {instruction}",
+        "{corpus}\n\n{cur_section}\n{}\n{id_section}\n{}\n{instruction}",
         serde_json::to_string(cur)?,
         hints.join("\n")
     );
     let mut messages = vec![
-        ChatMessage::system(&k.system_prompt()?),
+        ChatMessage::system(&k.system_prompt(lang)?),
         ChatMessage::user(&user),
     ];
     let mut fixed: Option<Value> = None;
@@ -925,11 +1046,10 @@ where
                     role: "assistant".into(),
                     content: out.content,
                 });
-                messages.push(ChatMessage::user(&format!(
-                    "你上一次的输出未通过 {} 契约校验，错误如下：\n{}\n\
-                     请修正后重新输出完整 JSON（只输出 JSON，不要解释）。",
+                messages.push(ChatMessage::user(&repair_message(
+                    lang,
                     k.contract(),
-                    errs.join("\n")
+                    &errs,
                 )));
             }
         }
@@ -949,7 +1069,8 @@ pub fn run<F>(ws: &Workspace, kinds: &[Kind], mut chat: F) -> Result<PipelineSta
 where
     F: FnMut(&[ChatMessage]) -> Result<CallOutcome>,
 {
-    let corpus = load_corpus(&ws.root)?;
+    let lang = ModelLang::resolve(&ws.config()?.workspace.model_lang);
+    let corpus = load_corpus(&ws.root, lang)?;
     let mut extracted: Vec<(Kind, Value)> = Vec::new();
     let mut current: Vec<Option<Value>> = vec![None; Kind::ORDER.len()];
     let mut usage = RunUsage::default();
@@ -975,7 +1096,11 @@ where
                 let fld_ids = declared_output_field_ids(current[0].as_ref());
                 if !fld_ids.is_empty() {
                     s.push_str(&format!(
-                        "\n【接口输出已声明的字段 id——字典必须把这些字段逐个定义为条目（field 值原样使用），不得遗漏或改名】\n{}\n",
+                        "\n{}\n{}\n",
+                        lang.pick(
+                            "【接口输出已声明的字段 id——字典必须把这些字段逐个定义为条目（field 值原样使用），不得遗漏或改名】",
+                            "[Field ids declared by API outputs - the dictionary must define every one of them as an entry (use the field id verbatim); none may be omitted or renamed]"
+                        ),
                         fld_ids.join(", ")
                     ));
                 }
@@ -1010,7 +1135,7 @@ where
                 s
             }
         };
-        let (value, kind_usage) = extract_artifact(k, &corpus, &known_ids, 2, &mut chat)?;
+        let (value, kind_usage) = extract_artifact(k, &corpus, &known_ids, 2, lang, &mut chat)?;
         usage.absorb(kind_usage);
         current[pos] = Some(value.clone());
         extracted.push((k, value));
@@ -1036,16 +1161,21 @@ where
                 known.push_str(&format!("F-*: {}\n", flow_ids.join(", ")));
             }
             let user = format!(
-                "{corpus}\n\n【已确定的引用 id 白名单——引用时只允许使用下列 id，不得发明白名单外的 id】\n{known}\n\
-                 【当前已提取的字典 JSON】\n{}\n\
-                 【接口输出已声明、但字典尚未定义的字段（格式：字段id ← 声明它的接口与响应路径）】\n{}\n\
-                 请把上述缺失字段逐个追加为字典条目：条目必须用左侧 FLD id 原样作为 field 值，不得改名或另造新 id；\n\
-                 已有条目保持不变，只输出修正后的完整字典 JSON。",
+                "{corpus}\n\n{}\n{known}\n{}\n{}\n{}\n{}",
+                whitelist_header(lang),
+                lang.pick("【当前已提取的字典 JSON】", "[Current extracted dictionary JSON]"),
                 serde_json::to_string(&dict)?,
-                hints.join("\n")
+                lang.pick(
+                    "【接口输出已声明、但字典尚未定义的字段（格式：字段id ← 声明它的接口与响应路径）】",
+                    "[Fields declared by API outputs but not yet defined in the dictionary (each line: field id <- declaring API and response path)]"
+                ),
+                lang.pick(
+                    "请把上述缺失字段逐个追加为字典条目：条目必须用左侧 FLD id 原样作为 field 值，不得改名或另造新 id；\n已有条目保持不变，只输出修正后的完整字典 JSON。",
+                    "Append each missing field above as a dictionary entry: the entry must use the left-side FLD id verbatim as its field value; never rename or invent a new id.\nKeep existing entries unchanged and output only the corrected complete dictionary JSON."
+                )
             );
             let mut messages = vec![
-                ChatMessage::system(&Kind::Dictionary.system_prompt()?),
+                ChatMessage::system(&Kind::Dictionary.system_prompt(lang)?),
                 ChatMessage::user(&user),
             ];
             let mut fixed: Option<Value> = None;
@@ -1062,11 +1192,10 @@ where
                             role: "assistant".into(),
                             content: out.content,
                         });
-                        messages.push(ChatMessage::user(&format!(
-                            "你上一次的输出未通过 {} 契约校验，错误如下：\n{}\n\
-                             请修正后重新输出完整 JSON（只输出 JSON，不要解释）。",
+                        messages.push(ChatMessage::user(&repair_message(
+                            lang,
                             Kind::Dictionary.contract(),
-                            errs.join("\n")
+                            &errs,
                         )));
                     }
                 }
@@ -1086,11 +1215,11 @@ where
     // 模型只能自造；按字典对账同一原则定向补全：引用侧不动，被引用侧以原 id 追加条目（最多两轮）。
     for _round in 0..2 {
         let rule_hints = match (&current[1], &current[3]) {
-            (Some(f), Some(r)) => dangling_rule_hints(f, r),
+            (Some(f), Some(r)) => dangling_rule_hints(f, r, lang),
             _ => Vec::new(),
         };
         let skill_hints = match (&current[1], &current[4]) {
-            (Some(f), Some(s)) => dangling_skill_hints(f, s),
+            (Some(f), Some(s)) => dangling_skill_hints(f, s, lang),
             _ => Vec::new(),
         };
         if rule_hints.is_empty() && skill_hints.is_empty() {
@@ -1103,6 +1232,7 @@ where
                 &mut current,
                 &mut extracted,
                 &corpus,
+                lang,
                 &mut chat,
                 &mut usage,
             )?;
@@ -1114,6 +1244,7 @@ where
                 &mut current,
                 &mut extracted,
                 &corpus,
+                lang,
                 &mut chat,
                 &mut usage,
             )?;
@@ -1188,7 +1319,7 @@ mod tests {
         let ws = crate::workspace::Workspace::create_at(&base, "img-ws").unwrap();
         std::fs::write(ws.root.join("corpus/flows/流程.md"), "第一步：报案").unwrap();
         std::fs::write(ws.root.join("corpus/flows/流程图.jpg"), [0xFF, 0xD8, 0x00]).unwrap();
-        let text = load_corpus(&ws.root).unwrap();
+        let text = load_corpus(&ws.root, ModelLang::Zh).unwrap();
         assert!(
             text.contains("流程.md") && !text.contains("流程图.jpg"),
             "{text}"
@@ -1238,7 +1369,7 @@ mod tests {
     #[test]
     fn per_kind_prompts_embed_own_schema() {
         for k in Kind::ORDER {
-            let p = k.system_prompt().unwrap();
+            let p = k.system_prompt(ModelLang::Zh).unwrap();
             let title = serde_json::from_str::<Value>(
                 icewright_artifact::schema_src(k.contract()).unwrap(),
             )
@@ -1253,7 +1384,7 @@ mod tests {
     #[test]
     fn repair_loop_recovers_on_second_try() {
         let mut n = 0;
-        let (out, usage) = extract_artifact(Kind::Rules, "语料", "", 2, |msgs| {
+        let (out, usage) = extract_artifact(Kind::Rules, "语料", "", 2, ModelLang::Zh, |msgs| {
             n += 1;
             if n == 1 {
                 assert_eq!(msgs.len(), 2);
@@ -1277,7 +1408,7 @@ mod tests {
         // 错误文案语种是全局状态，锁定并固定为 zh，避免与 i18n 切语种测试竞争
         let _g = crate::i18n::tests::LOCK.lock().unwrap();
         crate::i18n::set_lang("zh");
-        let e = extract_artifact(Kind::Rules, "语料", "", 1, |_| {
+        let e = extract_artifact(Kind::Rules, "语料", "", 1, ModelLang::Zh, |_| {
             Ok("{}".to_string().into())
         })
         .unwrap_err();
@@ -1287,10 +1418,17 @@ mod tests {
     #[test]
     fn whitelist_is_injected_into_user_turn() {
         let mut seen = String::new();
-        extract_artifact(Kind::Rules, "语料", "FLD-*: FLD-a, FLD-b", 0, |msgs| {
-            seen = msgs[1].content.clone();
-            Ok(canned_out(sample(Kind::Rules)))
-        })
+        extract_artifact(
+            Kind::Rules,
+            "语料",
+            "FLD-*: FLD-a, FLD-b",
+            0,
+            ModelLang::Zh,
+            |msgs| {
+                seen = msgs[1].content.clone();
+                Ok(canned_out(sample(Kind::Rules)))
+            },
+        )
         .unwrap();
         assert!(seen.contains("白名单"));
         assert!(seen.contains("FLD-a"));
@@ -1775,7 +1913,7 @@ mod tests {
         // create_at 已建分类子目录与 corpus/README.md（说明文件不参与提取）
         std::fs::write(ws.root.join("corpus/rules/条款.md"), "规则语料").unwrap();
         std::fs::write(ws.root.join("corpus/flows/流程.md"), "流程语料").unwrap();
-        let merged = load_corpus(&ws.root).unwrap();
+        let merged = load_corpus(&ws.root, ModelLang::Zh).unwrap();
         assert!(merged.contains("## 文件: rules/条款.md"), "{merged}");
         assert!(merged.contains("## 文件: flows/流程.md"), "{merged}");
         assert!(!merged.contains("语料组织约定"), "README 不应进入提取语料");
