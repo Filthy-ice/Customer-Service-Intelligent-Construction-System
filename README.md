@@ -24,6 +24,20 @@ cargo build --release        # 产物 target/release/icewright
 cargo build -p icewright-desktop   # 桌面监控端（Linux 需系统依赖：libwebkit2gtk-4.1-dev librsvg2-dev libxdo-dev libssl-dev）
 ```
 
+### 桌面端安装包（GitHub Release）
+
+打 `v*` 标签自动构建并发布于 [Releases](https://github.com/Filthy-ice/Ice-Wright/releases)：
+
+| 平台 | 产物 | 安装与注意 |
+| --- | --- | --- |
+| Debian/Ubuntu (amd64) | `.deb` | Ubuntu ≥ 22.04（自带 webkit2gtk 4.1）；`sudo apt install ./xxx.deb` 自动补依赖 |
+| Fedora/RHEL/openSUSE | `.rpm` | `sudo dnf install ./xxx.rpm` |
+| 其他 Linux | `.AppImage` | `chmod +x` 后运行；系统需 libfuse2 与 webkit2gtk-4.1 |
+| Windows 10/11 (x64) | `.msi` / `*-setup.exe` | 未签名，首次运行 SmartScreen 选「更多信息 → 仍要运行」；WebView2 运行时 Win11 内置 |
+| macOS (Apple Silicon) | `.dmg` | 未签名，首次右键 → 打开绕过 Gatekeeper |
+
+绕过包管理器裸跑二进制且缺库时，会在程序启动**之前**由动态加载器报终端错误（如 `error while loading shared libraries: libwebkit2gtk-4.1.so.0`），不会有界面内提示——请始终走上表的包管理器安装。CLI 全平台 `cargo build` 可用（HTTPS 走 rustls 纯 Rust 实现，无 OpenSSL 依赖）；Windows/macOS 安装包由 CI 构建验证，日常功能实测以 Linux 为主。
+
 ## 快速开始
 
 ```bash
