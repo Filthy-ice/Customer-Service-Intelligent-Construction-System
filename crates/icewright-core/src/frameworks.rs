@@ -86,7 +86,7 @@ const GO: &[Framework] = &[
         stars: "13.2k",
         pros: "组件化编排工程化深，字节维护活跃，eino-ext 提供 OpenAI-compatible 协议组件",
         cons: "未及 1.0，API 仍可能变动",
-        integration: Integration::Planned,
+        integration: Integration::Implemented,
     },
     Framework {
         name: "genkit-go",
