@@ -273,6 +273,11 @@ fn main() {
         ])
         .setup(|app| {
             apply_menu(app.handle())?;
+            // Linux 裸跑二进制没有 .desktop 关联时，GTK 回退齿轮图标；显式设置 _NET_WM_ICON。
+            if let Some(w) = app.get_webview_window("main") {
+                let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/128x128.png"))?;
+                w.set_icon(icon).map_err(|e| e.to_string())?;
+            }
             Ok(())
         })
         .on_menu_event(|app, event| handle_menu_action(app, event.id().0.as_str()))

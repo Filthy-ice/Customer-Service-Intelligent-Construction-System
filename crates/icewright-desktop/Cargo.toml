@@ -8,7 +8,7 @@ repository.workspace = true
 
 [dependencies]
 icewright-core = { path = "../icewright-core" }
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["image-png"] }
 anyhow = { workspace = true }
 chrono = { workspace = true }
 
