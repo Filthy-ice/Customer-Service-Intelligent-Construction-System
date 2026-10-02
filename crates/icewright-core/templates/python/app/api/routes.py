@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from app.config.settings import settings
 from app.domain import i18n
 from app.domain import rules as rule_engine
-from app.service import chat as chat_service
+from app.service import asyncmsg
 from app.service import session as session_service
 
 router = APIRouter()
@@ -23,11 +23,15 @@ router = APIRouter()
 STATIC_DIR = Path(__file__).resolve().parents[2] / "static"
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 
+# msgid 字符集收紧：安全进 Redis 键与 URL，跨栈一致（= java @Pattern / go 校验）
+_MSGID_PATTERN = r"^[A-Za-z0-9_.:-]{1,128}$"
+
 
 class ChatRequest(BaseModel):
     session_id: str = Field(min_length=1, max_length=128)
     message: str = Field(min_length=1, max_length=4000)
     language: Literal["zh", "en"] = "zh"
+    msgid: str | None = Field(default=None, pattern=_MSGID_PATTERN)
 
 
 class ChatResponse(BaseModel):
@@ -61,7 +65,44 @@ def healthz() -> HealthResponse:
 
 @router.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequest) -> ChatResponse:
-    return ChatResponse(**chat_service.answer(req.session_id, req.message, req.language))
+    """同步对话；带 msgid 时幂等——同会话重复 msgid 回放原回执，不重复处理。"""
+    result = asyncmsg.answer_idempotent(
+        req.session_id, req.msgid or "", req.message, req.language
+    )
+    return ChatResponse(**result)
+
+
+@router.post("/chat/async", status_code=202)
+def chat_async(req: ChatRequest) -> dict[str, str]:
+    """异步受理（非实时交互入口）：立即回执 accepted，后台线程处理完写结果文件。
+
+    msgid 缺省由服务端生成；重复提交同 msgid 幂等返回既有状态，不会二次处理。
+    """
+    msgid, status = asyncmsg.accept_async(req.session_id, req.msgid or "", req.message, req.language)
+    return {"session_id": req.session_id, "msgid": msgid, "status": status}
+
+
+@router.get("/messages/{msgid}/files")
+def message_files(msgid: str, session_id: str = "") -> dict[str, Any]:
+    """轮询取回：凭 会话+msgid 双段键查状态与文件清单（严禁裸 msgid 全局取回）。"""
+    if not session_id:
+        raise HTTPException(status_code=400, detail="必须携带 session_id（命名空间隔离）")
+    view = asyncmsg.files_view(session_id, msgid)
+    if view is None:
+        raise HTTPException(status_code=404, detail="msgid 未登记或已过 TTL，请重新提交")
+    return view
+
+
+@router.get("/messages/{msgid}/files/{file_id}")
+def message_file(msgid: str, file_id: str, session_id: str = "") -> FileResponse:
+    """下载异步结果文件：file_id 须在该 会话+msgid 登记表内（服务端生成，防越权枚举）。"""
+    view = message_files(msgid, session_id)
+    if not any(f["file_id"] == file_id for f in view["files"]):
+        raise HTTPException(status_code=404, detail="file_id 不在该会话登记内")
+    path = asyncmsg.load_file(file_id)
+    if path is None:
+        raise HTTPException(status_code=404, detail="结果文件已被清理")
+    return FileResponse(path, media_type="application/json")
 
 
 def _read_data_json(name: str) -> list[dict]:

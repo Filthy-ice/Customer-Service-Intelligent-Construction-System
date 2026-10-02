@@ -27,6 +27,9 @@ public final class Settings {
     public static final String MYSQL_PASSWORD = env("IW_MYSQL_PASSWORD", "");
     public static final String MYSQL_DATABASE = env("IW_MYSQL_DATABASE", "icewright_core");
 
+    /** 非实时交互回推回调（空=仅轮询 GET /messages/{msgid}/files）。 */
+    public static final String CALLBACK_URL = env("IW_CALLBACK_URL", "");
+
     private static String env(String name, String fallback) {
         String raw = System.getenv(name);
         return raw == null || raw.isEmpty() ? fallback : raw;

@@ -94,6 +94,45 @@ public class SessionService {
     }
 
     /**
+     * 读本项目命名空间下的易失 JSON 记录（如 msg:{session}:{msgid} 幂等登记）。
+     *
+     * @param suffix 键后缀（不含 iw:{project}: 前缀）
+     * @return 记录内容；不存在或非法 JSON 时为 null
+     */
+    public Map<String, Object> getRecord(String suffix) {
+        String raw = jedis.get(key(suffix));
+        if (raw == null || raw.isEmpty()) {
+            return null;
+        }
+        try {
+            Object parsed = mapper.readValue(raw, new TypeReference<Object>() {
+            });
+            if (parsed instanceof Map<?, ?> map) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> record = (Map<String, Object>) map;
+                return new LinkedHashMap<>(record);
+            }
+            return null;
+        } catch (java.io.IOException e) {
+            return null;
+        }
+    }
+
+    /**
+     * 写易失 JSON 记录（带 TTL，会话状态与幂等登记均不落长期数据）。
+     *
+     * @param suffix 键后缀（不含 iw:{project}: 前缀）
+     * @param record 记录内容
+     */
+    public void putRecord(String suffix, Map<String, Object> record) {
+        try {
+            jedis.setex(key(suffix), SLOTS_TTL_SECONDS, mapper.writeValueAsString(record));
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException("记录序列化失败", e);
+        }
+    }
+
+    /**
      * 枚举本项目全部会话槽位（SCAN 非 KEYS，不阻塞 Redis）；只读，不落业务数据。
      *
      * @return 每项为 {session_id, slots} 的有序 Map
@@ -106,6 +145,10 @@ public class SessionService {
             ScanResult<String> page = jedis.scan(cursor, new ScanParams().match(prefix + "*").count(100));
             for (String key : page.getResult()) {
                 String sessionId = key.substring(prefix.length());
+                // msg: 前缀是 msgid 幂等/文件回推登记表（AsyncMessageService），不是会话槽位
+                if (sessionId.startsWith("msg:")) {
+                    continue;
+                }
                 Map<String, Object> row = new LinkedHashMap<>();
                 row.put("session_id", sessionId);
                 row.put("slots", loadSlots(sessionId));

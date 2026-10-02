@@ -34,13 +34,16 @@ func main() {
 	if err != nil {
 		log.Fatalf("规则装载失败: %v", err)
 	}
-	handlers := web.NewHandlers(chat, sessions, func(w http.ResponseWriter, r *http.Request) {
+	async := service.NewAsyncService(chat, sessions)
+	handlers := web.NewHandlers(chat, async, sessions, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write(index)
 	}, admin, console)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/chat", handlers.Chat)
+	mux.HandleFunc("/chat/async", handlers.ChatAsync)
+	mux.HandleFunc("/messages/", handlers.Messages)
 	mux.HandleFunc("/healthz", handlers.Healthz)
 	mux.HandleFunc("/admin", handlers.Admin)
 	mux.HandleFunc("/admin/overview", handlers.AdminOverview)

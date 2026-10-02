@@ -27,6 +27,9 @@ var (
 	MysqlUser     = envOr("IW_MYSQL_USER", "root")
 	MysqlPassword = os.Getenv("IW_MYSQL_PASSWORD")
 	MysqlDatabase = envOr("IW_MYSQL_DATABASE", "icewright_core")
+
+	// CallbackURL 是非实时交互回推回调（空=仅轮询 GET /messages/{msgid}/files）。
+	CallbackURL = os.Getenv("IW_CALLBACK_URL")
 )
 
 func envOr(name, fallback string) string {

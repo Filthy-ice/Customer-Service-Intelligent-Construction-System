@@ -281,10 +281,10 @@ pub fn render_design(ws: &Workspace) -> Result<String> {
     out.push_str("- **依赖替换策略**：需求若排除某类设施（如不能使用 MySQL 等关系库、只能走文件），由客户提供对应依赖与工具类；客户未提供时，引擎默认生成一套实现并置于稳定接口之后（各栈 integration/ 层即\"端口+适配器\"形态，如 `IW_CORE_MODE=mock|mysql` 切换），客户后续以任何方式自接实现都不改动业务代码。\n");
     out.push_str("- **非实时交互契约**（异步任务的信息合并与文件回推）：\n");
     out.push_str("  1. 幂等与合并：入站消息携带 msgid；同会话内按 msgid 去重（重发不重复处理）、按到达序把多条消息合并为单一上下文，槽位增量合并。\n");
-    out.push_str("  2. 文件回推：异步任务生成的文件不随响应同步返回；写入共享存储后，在**同一个 Redis** 登记命名空间键 `iw:{系统名}:files:{session_id}:{msgid}` → file_id 列表（带 TTL）。\n");
-    out.push_str("  3. 取回隔离：客户系统凭 session_id+msgid 从同一 Redis 取文件标识/链接；键必须带会话+msgid 双前缀、file_id 由服务端生成，严禁裸 msgid 全局键，防止多会话取混乱。\n");
-    out.push_str("  4. 取回模式：默认轮询 `GET /messages/{msgid}/files`；客户可提供回调 URL，启用推送模式（webhook 携带同一 file_id，幂等重放安全）。\n");
-    out.push_str("  5. 落地状态：⏳ 本节为交互契约锚点；当前三栈模板的 `/chat` 为同步接口，异步端点须待模板集成后交付，闸门A 时如实标注、不谎称已实现。\n");
+    out.push_str("  2. 文件回推：异步任务生成的文件不随响应同步返回；写入文件存储（服务端生成 file_id，默认落 `data/files/`，接口化可替换）后，在**同一个 Redis** 登记命名空间键 `iw:{系统名}:msg:{session_id}:{msgid}` → 消息记录（含 files 列表，TTL 3600s）。\n");
+    out.push_str("  3. 取回隔离：客户系统凭 session_id+msgid 从同一 Redis 取文件标识/链接；键必须带会话+msgid 双前缀、file_id 由服务端生成且下载须先登记校验，严禁裸 msgid 全局键，防止多会话取混乱。\n");
+    out.push_str("  4. 取回模式：默认轮询 `GET /messages/{msgid}/files?session_id=` 与 `GET /messages/{msgid}/files/{file_id}?session_id=`；客户可设 `IW_CALLBACK_URL` 环境变量启用推送模式（webhook 携带同一 file_id，幂等重放安全，留空=仅轮询）。\n");
+    out.push_str("  5. 落地状态：✅ 三栈模板已集成——`POST /chat` 带 msgid 幂等重放、`POST /chat/async`（202 受理，缺 msgid 服务端生成）、上述轮询/下载端点与可选回调推送，三栈线格式一致，契约测试随生成物交付。\n");
 
     out.push_str("\n## 9. 闸门A 确认须知\n\n");
     out.push_str("- 本文件由引擎确定性渲染；任何产物变更后须重新 `design render` 并再次确认。\n");

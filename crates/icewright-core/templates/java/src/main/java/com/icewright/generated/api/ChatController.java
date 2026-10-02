@@ -3,11 +3,14 @@ package com.icewright.generated.api;
 
 import com.icewright.generated.api.dto.ChatRequest;
 import com.icewright.generated.api.dto.ChatResponse;
-import com.icewright.generated.service.ChatService;
+import com.icewright.generated.service.AsyncMessageService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
+import java.util.Map;
 
 /**
  * HTTP 层：入参校验与响应模型，业务逻辑一律下沉到 service。
@@ -17,16 +20,23 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public class ChatController {
 
-    private final ChatService chatService;
+    private final AsyncMessageService asyncMessageService;
 
-    public ChatController(ChatService chatService) {
-        this.chatService = chatService;
+    public ChatController(AsyncMessageService asyncMessageService) {
+        this.asyncMessageService = asyncMessageService;
     }
 
+    /** 同步对话；带 msgid 时幂等——同会话重复 msgid 回放原回执，不重复处理。 */
     @PostMapping("/chat")
     public ChatResponse chat(@Valid @RequestBody ChatRequest request) {
-        ChatService.Reply reply = chatService.answer(
-            request.getSessionId(), request.getMessage(), request.getLanguage());
-        return new ChatResponse(reply.sessionId(), reply.reply(), reply.matchedRules(), reply.language());
+        Map<String, Object> result = asyncMessageService.answerIdempotent(
+            request.getSessionId(), request.getMsgid(), request.getMessage(), request.getLanguage());
+        @SuppressWarnings("unchecked")
+        List<String> matched = (List<String>) result.get("matched_rules");
+        return new ChatResponse(
+            String.valueOf(result.get("session_id")),
+            String.valueOf(result.get("reply")),
+            matched,
+            String.valueOf(result.get("language")));
     }
 }

@@ -19,6 +19,12 @@ curl -X POST localhost:8000/chat -H 'content-type: application/json' \
   -d '{"session_id":"s1","message":"我的案子CLM-0001材料齐了吗","language":"zh"}'
 curl -X POST localhost:8000/chat -H 'content-type: application/json' \
   -d '{"session_id":"s1","message":"Is my claim CLM-0001 ready?","language":"en"}'
+# 非实时交互（三栈同形契约）：/chat 可选 msgid——同会话同 msgid 幂等只处理一次；
+curl -X POST localhost:8000/chat/async -H 'content-type: application/json' \
+  -d '{"session_id":"s1","message":"生成理赔材料包","msgid":"task-001"}'   # 202 受理，后台处理
+curl 'localhost:8000/messages/task-001/files?session_id=s1'   # 轮询状态与文件清单（msgid 须配 session_id）
+curl -OJ 'localhost:8000/messages/task-001/files/<file_id>?session_id=s1'   # 下载结果文件
+# 配 IW_CALLBACK_URL 即启用推送模式（webhook 带同一 file_id，消费端按 msgid 幂等重放安全）。
 curl localhost:8000/healthz
 
 # 测试：go test ./...

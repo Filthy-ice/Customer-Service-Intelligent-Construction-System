@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"icewright.local/{{artifact_id}}/config"
@@ -19,10 +20,14 @@ const (
 	maxBodyBytes    = 1 << 20
 )
 
+// validMsgid 字符集收紧：安全进 Redis 键与 URL，三栈一致。
+var validMsgid = regexp.MustCompile(`^[A-Za-z0-9_.:-]{1,128}$`)
+
 type chatRequest struct {
 	SessionID string `json:"session_id"`
 	Message   string `json:"message"`
 	Language  string `json:"language"`
+	MsgID     string `json:"msgid,omitempty"`
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
@@ -39,40 +44,51 @@ func writeError(w http.ResponseWriter, detail string) {
 // /sessions/{id}、/healthz、POST /chat；/console 与 /console/sessions 按开关守卫。
 type Handlers struct {
 	chat        *service.ChatService
+	async       *service.AsyncService
 	sessions    *service.SessionService
 	indexHTML   func(w http.ResponseWriter, r *http.Request)
 	adminHTML   []byte
 	consoleHTML []byte
 }
 
-func NewHandlers(chat *service.ChatService, sessions *service.SessionService,
+func NewHandlers(chat *service.ChatService, async *service.AsyncService, sessions *service.SessionService,
 	indexHTML func(http.ResponseWriter, *http.Request), adminHTML, consoleHTML []byte) *Handlers {
-	return &Handlers{chat: chat, sessions: sessions, indexHTML: indexHTML,
+	return &Handlers{chat: chat, async: async, sessions: sessions, indexHTML: indexHTML,
 		adminHTML: adminHTML, consoleHTML: consoleHTML}
 }
 
 func (h *Handlers) Chat(w http.ResponseWriter, r *http.Request) {
+	req, lang, ok := parseChat(w, r)
+	if !ok {
+		return
+	}
+	// 带 msgid 幂等：同会话重复 msgid 回放原回执，不重复处理
+	writeJSON(w, http.StatusOK, h.async.AnswerIdempotent(req.SessionID, req.MsgID, req.Message, lang))
+}
+
+// parseChat 复用 /chat 的入参校验（/chat/async 线格式完全一致）。
+func parseChat(w http.ResponseWriter, r *http.Request) (chatRequest, string, bool) {
 	if r.Method != http.MethodPost {
 		writeError(w, "仅支持 POST")
-		return
+		return chatRequest{}, "", false
 	}
 	raw, err := io.ReadAll(io.LimitReader(r.Body, maxBodyBytes))
 	if err != nil {
 		writeError(w, "请求体读取失败")
-		return
+		return chatRequest{}, "", false
 	}
 	var req chatRequest
 	if err := json.Unmarshal(raw, &req); err != nil {
-		writeError(w, "请求体不是合法 JSON（字段：session_id/message/language）")
-		return
+		writeError(w, "请求体不是合法 JSON（字段：session_id/message/language/msgid）")
+		return chatRequest{}, "", false
 	}
 	if req.SessionID == "" || len([]rune(req.SessionID)) > maxSessionIDLen {
 		writeError(w, "session_id 必须非空且不超过 128 字符")
-		return
+		return chatRequest{}, "", false
 	}
 	if req.Message == "" || len([]rune(req.Message)) > maxMessageLen {
 		writeError(w, "message 必须非空且不超过 4000 字符")
-		return
+		return chatRequest{}, "", false
 	}
 	lang := strings.ToLower(strings.TrimSpace(req.Language))
 	if lang == "" {
@@ -80,9 +96,85 @@ func (h *Handlers) Chat(w http.ResponseWriter, r *http.Request) {
 	}
 	if lang != "zh" && lang != "en" {
 		writeError(w, "language 仅支持 zh/en")
+		return chatRequest{}, "", false
+	}
+	if req.MsgID != "" && !validMsgid.MatchString(req.MsgID) {
+		writeError(w, "msgid 仅允许字母/数字/._:-，长度 1~128")
+		return chatRequest{}, "", false
+	}
+	return req, lang, true
+}
+
+// ChatAsync 异步受理：202 回执 accepted，后台 goroutine 处理完写结果文件；
+// msgid 缺省由服务端生成，重复提交同 msgid 幂等返回既有状态。
+func (h *Handlers) ChatAsync(w http.ResponseWriter, r *http.Request) {
+	req, lang, ok := parseChat(w, r)
+	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, h.chat.Answer(req.SessionID, req.Message, lang))
+	msgid, status, err := h.async.AcceptAsync(req.SessionID, req.MsgID, req.Message, lang)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"detail": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{
+		"session_id": req.SessionID, "msgid": msgid, "status": status,
+	})
+}
+
+// Messages 处理 /messages/{msgid}/files 与 /messages/{msgid}/files/{file_id}：
+// 轮询取回凭 会话+msgid 双段键（严禁裸 msgid 全局取回），下载 file_id 须在登记内。
+func (h *Handlers) Messages(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, "仅支持 GET")
+		return
+	}
+	sessionID := r.URL.Query().Get("session_id")
+	if sessionID == "" {
+		writeError(w, "必须携带 session_id（命名空间隔离）")
+		return
+	}
+	rest := strings.TrimPrefix(r.URL.Path, "/messages/")
+	parts := strings.Split(rest, "/")
+	switch {
+	case len(parts) == 2 && parts[1] == "files":
+		view := h.async.FilesView(sessionID, parts[0])
+		if view == nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"detail": "msgid 未登记或已过 TTL，请重新提交"})
+			return
+		}
+		writeJSON(w, http.StatusOK, view)
+	case len(parts) == 3 && parts[1] == "files":
+		view := h.async.FilesView(sessionID, parts[0])
+		if view == nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"detail": "msgid 未登记或已过 TTL，请重新提交"})
+			return
+		}
+		if !fileRegistered(view, parts[2]) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"detail": "file_id 不在该会话登记内"})
+			return
+		}
+		path, ok := service.LoadFile(parts[2])
+		if !ok {
+			writeJSON(w, http.StatusNotFound, map[string]string{"detail": "结果文件已被清理"})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		http.ServeFile(w, r, path)
+	default:
+		writeJSON(w, http.StatusNotFound, map[string]string{"detail": "路径应为 /messages/{msgid}/files[/{file_id}]"})
+	}
+}
+
+func fileRegistered(view map[string]any, fileID string) bool {
+	raw, _ := view["files"].([]any)
+	for _, item := range raw {
+		f, _ := item.(map[string]any)
+		if f["file_id"] == fileID {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *Handlers) Healthz(w http.ResponseWriter, r *http.Request) {

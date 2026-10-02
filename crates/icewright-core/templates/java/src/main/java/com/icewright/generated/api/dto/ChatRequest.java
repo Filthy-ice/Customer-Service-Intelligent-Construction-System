@@ -25,6 +25,11 @@ public class ChatRequest {
     @Pattern(regexp = "zh|en")
     private String language = "zh";
 
+    /** msgid 可选：同会话同 msgid 幂等只处理一次；字符集收紧以便安全进 Redis 键与 URL（三栈一致）。 */
+    @JsonProperty("msgid")
+    @Pattern(regexp = "^[A-Za-z0-9_.:-]{1,128}$")
+    private String msgid;
+
     public String getSessionId() {
         return sessionId;
     }
@@ -47,5 +52,13 @@ public class ChatRequest {
 
     public void setLanguage(String language) {
         this.language = language;
+    }
+
+    public String getMsgid() {
+        return msgid;
+    }
+
+    public void setMsgid(String msgid) {
+        this.msgid = msgid;
     }
 }

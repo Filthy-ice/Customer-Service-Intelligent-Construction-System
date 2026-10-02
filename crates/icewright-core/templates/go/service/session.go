@@ -85,6 +85,32 @@ func (s *SessionService) MergeSlots(sessionID string, patch map[string]any) (dom
 	return slots, nil
 }
 
+// GetRecord 读本项目命名空间下的易失 JSON 记录（如 msg:{session}:{msgid} 幂等登记）。
+func (s *SessionService) GetRecord(suffix string) (map[string]any, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), dialTimeout)
+	defer cancel()
+	raw, err := s.rdb.Get(ctx, s.key(suffix)).Result()
+	if err != nil || raw == "" {
+		return nil, false
+	}
+	var data map[string]any
+	if err := json.Unmarshal([]byte(raw), &data); err != nil {
+		return nil, false
+	}
+	return data, true
+}
+
+// PutRecord 写易失 JSON 记录（带 TTL，会话状态与幂等登记均不落长期数据）。
+func (s *SessionService) PutRecord(suffix string, record map[string]any) error {
+	ctx, cancel := context.WithTimeout(context.Background(), dialTimeout)
+	defer cancel()
+	payload, err := json.Marshal(record)
+	if err != nil {
+		return fmt.Errorf("记录序列化失败: %w", err)
+	}
+	return s.rdb.Set(ctx, s.key(suffix), payload, slotsTTL).Err()
+}
+
 // SessionRow 是一行会话槽位快照（供业务后台列表；只含易失状态，不含业务数据）。
 type SessionRow struct {
 	SessionID string      `json:"session_id"`
@@ -105,6 +131,10 @@ func (s *SessionService) ListSessions() []SessionRow {
 		}
 		for _, key := range keys {
 			sessionID := strings.TrimPrefix(key, prefix)
+			// msg: 前缀是 msgid 幂等/文件回推登记表（asyncmsg），不是会话槽位
+			if strings.HasPrefix(sessionID, "msg:") {
+				continue
+			}
 			out = append(out, SessionRow{SessionID: sessionID, Slots: s.LoadSlots(sessionID)})
 		}
 		if next == 0 {

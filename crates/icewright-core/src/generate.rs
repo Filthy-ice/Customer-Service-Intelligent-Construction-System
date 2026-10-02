@@ -68,6 +68,10 @@ static TEMPLATES_PY: &[(&str, &str)] = &[
         include_str!("../templates/python/app/service/chat.py"),
     ),
     (
+        "app/service/asyncmsg.py",
+        include_str!("../templates/python/app/service/asyncmsg.py"),
+    ),
+    (
         "app/domain/__init__.py",
         include_str!("../templates/python/app/domain/__init__.py"),
     ),
@@ -119,6 +123,10 @@ static TEMPLATES_PY: &[(&str, &str)] = &[
         "tests/test_skills.py",
         include_str!("../templates/python/tests/test_skills.py"),
     ),
+    (
+        "tests/test_async_msgid.py",
+        include_str!("../templates/python/tests/test_async_msgid.py"),
+    ),
 ];
 
 /// 目标栈为 java 时的骨架模板（Spring Boot 3 / JDK21，嵩山版分层：api/service/domain/integration/config）。
@@ -157,6 +165,10 @@ static TEMPLATES_JAVA: &[(&str, &str)] = &[
     (
         "src/main/java/com/icewright/generated/api/ChatController.java",
         include_str!("../templates/java/src/main/java/com/icewright/generated/api/ChatController.java"),
+    ),
+    (
+        "src/main/java/com/icewright/generated/api/MessageController.java",
+        include_str!("../templates/java/src/main/java/com/icewright/generated/api/MessageController.java"),
     ),
     (
         "src/main/java/com/icewright/generated/api/HealthController.java",
@@ -203,6 +215,10 @@ static TEMPLATES_JAVA: &[(&str, &str)] = &[
         include_str!("../templates/java/src/main/java/com/icewright/generated/service/ChatService.java"),
     ),
     (
+        "src/main/java/com/icewright/generated/service/AsyncMessageService.java",
+        include_str!("../templates/java/src/main/java/com/icewright/generated/service/AsyncMessageService.java"),
+    ),
+    (
         "src/main/java/com/icewright/generated/domain/RulesEngine.java",
         include_str!("../templates/java/src/main/java/com/icewright/generated/domain/RulesEngine.java"),
     ),
@@ -233,6 +249,10 @@ static TEMPLATES_JAVA: &[(&str, &str)] = &[
     (
         "src/test/java/com/icewright/generated/domain/I18nTest.java",
         include_str!("../templates/java/src/test/java/com/icewright/generated/domain/I18nTest.java"),
+    ),
+    (
+        "src/test/java/com/icewright/generated/service/AsyncMessageContractTest.java",
+        include_str!("../templates/java/src/test/java/com/icewright/generated/service/AsyncMessageContractTest.java"),
     ),
 ];
 
@@ -291,6 +311,14 @@ static TEMPLATES_GO: &[(&str, &str)] = &[
     (
         "service/chat.go",
         include_str!("../templates/go/service/chat.go"),
+    ),
+    (
+        "service/asyncmsg.go",
+        include_str!("../templates/go/service/asyncmsg.go"),
+    ),
+    (
+        "service/asyncmsg_test.go",
+        include_str!("../templates/go/service/asyncmsg_test.go"),
     ),
     (
         "web/handlers.go",

@@ -53,12 +53,33 @@ def merge_slots(session_id: str, patch: dict) -> dict:
     return slots
 
 
+def get_json(suffix: str) -> dict | None:
+    """读本项目命名空间下的易失 JSON 记录（如 msg:{session}:{msgid}），不存在返回 None。"""
+    raw = _client().get(_key(suffix))
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def set_json(suffix: str, value: dict, ttl_seconds: int = SLOTS_TTL_SECONDS) -> None:
+    _client().set(_key(suffix), json.dumps(value, ensure_ascii=False), ex=ttl_seconds)
+
+
 def list_sessions() -> list[dict]:
-    """枚举本项目全部会话槽位（scan 非 keys，不阻塞 Redis）；只读，不落业务数据。"""
+    """枚举本项目全部会话槽位（scan 非 keys，不阻塞 Redis）；只读，不落业务数据。
+
+    msg: 前缀是 msgid 幂等/文件回推登记表（见 asyncmsg），不是会话槽位，跳过。
+    """
     prefix = "iw:%s:" % settings.project
     client = _client()
     out = []
     for key in client.scan_iter(match=prefix + "*"):
         session_id = key[len(prefix):]
+        if session_id.startswith("msg:"):
+            continue
         out.append({"session_id": session_id, "slots": load_slots(session_id)})
     return out

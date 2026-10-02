@@ -20,31 +20,34 @@ impl Check {
     }
 }
 
-const REQUIRED_FILES_PY: [&str; 6] = [
+const REQUIRED_FILES_PY: [&str; 7] = [
     "requirements.txt",
     "app/main.py",
     "app/data/rules.json",
     "tests/test_rules.py",
     "app/domain/i18n.py",
     "static/chat.html",
+    "app/service/asyncmsg.py",
 ];
 
-const REQUIRED_FILES_JAVA: [&str; 6] = [
+const REQUIRED_FILES_JAVA: [&str; 7] = [
     "pom.xml",
     "src/main/java/com/icewright/generated/IcewrightApplication.java",
     "src/main/resources/data/rules.json",
     "src/test/java/com/icewright/generated/domain/RulesEngineTest.java",
     "src/main/java/com/icewright/generated/domain/I18n.java",
     "src/main/resources/static/index.html",
+    "src/main/java/com/icewright/generated/service/AsyncMessageService.java",
 ];
 
-const REQUIRED_FILES_GO: [&str; 6] = [
+const REQUIRED_FILES_GO: [&str; 7] = [
     "go.mod",
     "main.go",
     "assets/rules.json",
     "domain/rules_test.go",
     "domain/i18n.go",
     "static/index.html",
+    "service/asyncmsg.go",
 ];
 
 fn required_files(stack: &str) -> &'static [&'static str] {
