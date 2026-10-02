@@ -33,6 +33,9 @@ var DICT = {
       executing: "{0} 执行中…",
       refresh_fail: "刷新失败：{0}",
       no_history: "暂无历史记录",
+      about_desc: "S1–S8 流水线构建器：把行业规则与流程交给 AI，产出可交付的客服系统。",
+      about_github: "GitHub 主页",
+      about_close: "关闭",
     },
   },
   en: {
@@ -64,6 +67,9 @@ var DICT = {
       executing: "{0} running…",
       refresh_fail: "Refresh failed: {0}",
       no_history: "No history yet",
+      about_desc: "S1-S8 pipeline builder: hand industry rules and flows to the AI, get a deliverable customer-service system back.",
+      about_github: "GitHub Homepage",
+      about_close: "Close",
     },
   },
 };
@@ -73,12 +79,17 @@ var langPref = null;
 try { langPref = localStorage.getItem("iw-lang"); } catch (e) { langPref = null; }
 if (langPref !== "en" && langPref !== "zh") { langPref = null; }
 var lang = langPref || "zh";
+// 原生菜单栏语种与界面语种保持同步（浏览器 mock 环境下静默降级）。
+function pushMenuLang(l) {
+  try { invoke("set_menu_lang", { lang: l }).catch(function () {}); } catch (e) { /* 非 Tauri 环境 */ }
+}
 function syncLang(l) {
   lang = l;
   langPref = l;
   try { localStorage.setItem("iw-lang", l); } catch (e) { /* 隐私模式下忽略 */ }
   applyStatic();
   renderLangToggle();
+  pushMenuLang(l);
 }
 function renderLangToggle() {
   $("lang-zh").classList.toggle("active", lang === "zh");
@@ -305,6 +316,7 @@ async function refresh() {
     lang = next;
     applyStatic();
     renderLangToggle();
+    pushMenuLang(next);
   }
   var st = await invoke("pipeline_status", { wsId: selected });
   $("empty").classList.add("hidden");
@@ -324,8 +336,48 @@ async function tick() {
   }
 }
 
-invoke("app_version").then(function (v) { $("ver").textContent = "v" + v; });
+/* ---------- 关于对话框与原生菜单栏事件 ---------- */
+var APP_VER = "";
+
+function showAbout() {
+  $("about-version").textContent = APP_VER ? "v" + APP_VER : "";
+  $("about-modal").classList.remove("hidden");
+}
+function hideAbout() { $("about-modal").classList.add("hidden"); }
+
+function initAbout() {
+  $("about-close").onclick = hideAbout;
+  $("about-github").onclick = function () {
+    try { invoke("open_github").catch(function () {}); } catch (e) { /* 非 Tauri 环境 */ }
+  };
+  $("about-modal").addEventListener("click", function (e) {
+    if (e.target === this) { hideAbout(); }
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") { hideAbout(); }
+  });
+}
+
+function initMenuEvents() {
+  var ev = window.__TAURI__ && window.__TAURI__.event;
+  if (!ev || !ev.listen) { return; }
+  ev.listen("menu-action", function (msg) {
+    var a = String(msg.payload);
+    if (a === "refresh") { tick(); }
+    else if (a === "reload") { location.reload(); }
+    else if (a === "about") { showAbout(); }
+    else if (a === "lang:zh") { syncLang("zh"); refresh(); }
+    else if (a === "lang:en") { syncLang("en"); refresh(); }
+  }).catch(function () {});
+}
+
 initLangToggle();
 initActions();
-tick();
+initAbout();
+initMenuEvents();
+invoke("app_version").then(function (v) { APP_VER = v; }).catch(function () {});
+// 窗口以 visible:false 启动：首帧渲染完成后亮相，启动动画随之播放。
+tick().then(function () {
+  try { invoke("show_window").catch(function () {}); } catch (e) { /* 非 Tauri 环境 */ }
+});
 setInterval(tick, 2000);

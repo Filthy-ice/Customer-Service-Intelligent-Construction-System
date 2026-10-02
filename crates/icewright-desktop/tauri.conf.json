@@ -14,7 +14,10 @@
         "title": "IceWright Desktop",
         "width": 1080,
         "height": 720,
-        "resizable": true
+        "minWidth": 900,
+        "minHeight": 560,
+        "resizable": true,
+        "visible": false
       }
     ],
     "security": {

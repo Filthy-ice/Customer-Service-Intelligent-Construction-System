@@ -9,7 +9,7 @@
 <body>
   <div class="layout">
     <aside>
-      <h1>IceWright <span id="ver"></span></h1>
+      <h1>IceWright</h1>
       <div class="lang-toggle" id="lang-toggle">
         <button id="lang-zh" type="button">中文</button><button id="lang-en" type="button">EN</button>
       </div>
@@ -42,6 +42,19 @@
         <ul id="history"></ul>
       </section>
     </main>
+  </div>
+  <div id="about-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="about-name">
+    <div class="modal-card">
+      <img class="about-icon" src="about-icon.png" alt="" />
+      <div id="about-name" class="about-name">IceWright Desktop</div>
+      <div id="about-version" class="about-version"></div>
+      <div class="about-license">Apache-2.0 · Filthy-ice/Ice-Wright</div>
+      <p id="about-desc" class="about-desc" data-i18n="about_desc"></p>
+      <div class="about-actions">
+        <button id="about-github" type="button" data-i18n="about_github">GitHub 主页</button>
+        <button id="about-close" type="button" class="primary" data-i18n="about_close">关闭</button>
+      </div>
+    </div>
   </div>
   <script src="app.js"></script>
 </body>

@@ -15,7 +15,7 @@
 - **生成历史与语料分类**：每次有状态推进（预检、提取、渲染、生成、验证、交付、两道闸门决策）自动追加到 workspace 的 `pipeline/history.jsonl`，`icewright pipeline history` 按时间回看全程；需求语料按 `corpus/{apis|flows|dictionary|rules|skills|other}/` 分类子目录投放，提取时递归读取。
 - **自带模型接入（BYOK）**：任何 OpenAI-compatible 端点均可；供应商目录 + 在线模型发现，接入点与模型名不写死。
 - **双语界面**：构建器 CLI 文案 zh/en 可选（`workspace.locale` 或 `ICERIGHT_LOCALE`）。
-- **桌面客户端**：`icewright-desktop`（Tauri 2）实时查看各 workspace 的 S1–S8 进度、闸门状态与生成历史，并可在窗口内直接推进：初始化、预检、渲染设计、两道闸门决策、生成、验证、交付——与 CLI 走同一状态机路径，决策人记为 `desktop`；S3 提取需模型会话交互，仍走 CLI。危险操作（批准闸门）需二次点击确认。界面文案与引擎报错均中英双语：默认跟随该 workspace 的 `locale`，也可在窗口内直接点「中文 / EN」切换（手动选择优先并跨重启记忆）。
+- **桌面客户端**：`icewright-desktop`（Tauri 2）实时查看各 workspace 的 S1–S8 进度、闸门状态与生成历史，并可在窗口内直接推进：初始化、预检、渲染设计、两道闸门决策、生成、验证、交付——与 CLI 走同一状态机路径，决策人记为 `desktop`；S3 提取需模型会话交互，仍走 CLI。危险操作（批准闸门）需二次点击确认。界面文案与引擎报错均中英双语：默认跟随该 workspace 的 `locale`，也可在窗口内直接点「中文 / EN」切换（手动选择优先并跨重启记忆）。原生菜单栏（文件/视图/窗口/帮助）提供刷新、重新加载、语种切换与「关于」对话框，快捷键 F5 / Ctrl(Cmd)+R / Ctrl(Cmd)+Q；窗口带启动淡入动画，版本信息收入「关于」而非挂在明面上。
 
 ## 安装
 
