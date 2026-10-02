@@ -171,6 +171,9 @@ h3 { margin: 12px 0 8px; font-size: 14px; }
 .new-file button { padding: 5px 12px; border: 1px solid var(--accent); color: var(--accent);
   background: transparent; border-radius: 6px; font-family: inherit; font-size: 12.5px; cursor: pointer; }
 .new-file button:hover { background: var(--accent); color: #fff; }
+.mini-check { display: flex; align-items: center; gap: 6px; font-size: 12px; opacity: .85;
+  cursor: pointer; user-select: none; white-space: nowrap; }
+.mini-check input[type="checkbox"] { width: auto; padding: 0; border: 0; accent-color: var(--accent); cursor: pointer; }
 .edit-head { font-family: monospace; font-size: 12px; opacity: .75; word-break: break-all; }
 .editor { flex: 1; min-height: 260px; resize: vertical; padding: 10px 12px; border: 1px solid var(--line);
   border-radius: 8px; font-family: monospace; font-size: 12.5px; line-height: 1.5;

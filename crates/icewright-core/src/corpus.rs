@@ -15,6 +15,8 @@ pub const DEFAULT_CAT: &str = "other";
 pub struct ImportReport {
     /// 落盘相对路径（`分类/文件名`，相对 corpus/）
     pub copied: Vec<String>,
+    /// 更新模式下覆盖了同名旧快照
+    pub updated: Vec<String>,
     /// 同名同内容已存在（幂等重导入时不重复拷贝）
     pub identical: usize,
     /// 非 UTF-8 文本跳过（S3 只读文本语料）
@@ -61,15 +63,25 @@ fn gather(src: &Path) -> Result<Vec<PathBuf>> {
     Ok(out)
 }
 
-/// 目标落名：同名同内容视为已导入（幂等）；同名不同内容加 -2/-3… 后缀共存。
-/// 返回 Some(最终文件名) 需要拷贝，None 表示内容已存在。
-fn target_name(dir: &Path, name: &str, bytes: &[u8]) -> Result<Option<String>> {
+/// 目标落名：同名同内容视为已导入（幂等）；同名不同内容——update 模式覆盖旧快照
+/// （S8 客户刷新材料后重导入刷新），否则加 -2/-3 后缀共存。
+/// 返回 (最终文件名, 是否覆盖更新)；None 表示内容已存在无需拷贝。
+fn target_name(
+    dir: &Path,
+    name: &str,
+    bytes: &[u8],
+    update: bool,
+) -> Result<Option<(String, bool)>> {
     let exact = dir.join(name);
-    if exact.exists() && std::fs::read(&exact)? == bytes {
-        return Ok(None);
-    }
-    if !exact.exists() {
-        return Ok(Some(name.to_string()));
+    if exact.exists() {
+        if std::fs::read(&exact)? == bytes {
+            return Ok(None);
+        }
+        if update {
+            return Ok(Some((name.to_string(), true)));
+        }
+    } else {
+        return Ok(Some((name.to_string(), false)));
     }
     let (stem, ext) = match name.rfind('.') {
         Some(i) if i > 0 => (&name[..i], &name[i..]),
@@ -79,7 +91,7 @@ fn target_name(dir: &Path, name: &str, bytes: &[u8]) -> Result<Option<String>> {
         let cand = format!("{stem}-{i}{ext}");
         let p = dir.join(&cand);
         if !p.exists() {
-            return Ok(Some(cand));
+            return Ok(Some((cand, false)));
         }
         if std::fs::read(&p)? == bytes {
             return Ok(None);
@@ -90,7 +102,8 @@ fn target_name(dir: &Path, name: &str, bytes: &[u8]) -> Result<Option<String>> {
 
 /// 把客户给定的文件/目录（任意位置，支持 ~ 展开）拷进 corpus/<分类>/。
 /// 单一文件名扁平落进分类目录，与桌面语料面板的路径模型一致；目录源递归收全。
-pub fn import(ws: &Workspace, raw: &str, cat: Option<&str>) -> Result<ImportReport> {
+/// update=true 时同名不同内容覆盖旧快照（重导入刷新）；否则加后缀共存。
+pub fn import(ws: &Workspace, raw: &str, cat: Option<&str>, update: bool) -> Result<ImportReport> {
     let raw = raw.trim();
     if raw.is_empty() {
         bail!("{}", t!("corpus_src_empty"));
@@ -121,10 +134,15 @@ pub fn import(ws: &Workspace, raw: &str, cat: Option<&str>) -> Result<ImportRepo
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .context(t!("corpus_src_missing", f.display()))?;
-        if let Some(final_name) = target_name(&dest, &name, &bytes)? {
+        if let Some((final_name, was_update)) = target_name(&dest, &name, &bytes, update)? {
             std::fs::write(dest.join(&final_name), &bytes)
                 .with_context(|| format!("write {}", dest.join(&final_name).display()))?;
-            rep.copied.push(format!("{cat}/{final_name}"));
+            let rel = format!("{cat}/{final_name}");
+            if was_update {
+                rep.updated.push(rel);
+            } else {
+                rep.copied.push(rel);
+            }
         } else {
             rep.identical += 1;
         }
@@ -150,7 +168,7 @@ mod tests {
         std::fs::write(inbox.join(".隐藏"), "x").unwrap();
         std::fs::write(inbox.join("图片.png"), [0xFF, 0xFE, 0x00]).unwrap();
 
-        let rep = import(&ws, inbox.to_str().unwrap(), Some("rules")).unwrap();
+        let rep = import(&ws, inbox.to_str().unwrap(), Some("rules"), false).unwrap();
         assert_eq!(
             rep.copied,
             vec![
@@ -165,12 +183,12 @@ mod tests {
         assert!(inbox.join("理赔规则.md").is_file());
 
         // 幂等：同内容重导入只记 identical
-        let rep2 = import(&ws, inbox.to_str().unwrap(), Some("rules")).unwrap();
+        let rep2 = import(&ws, inbox.to_str().unwrap(), Some("rules"), false).unwrap();
         assert!(rep2.copied.is_empty() && rep2.identical == 2, "{rep2:?}");
 
         // 同名不同内容：同分类内加后缀共存，不覆盖既有语料；不同分类互不冲突
         std::fs::write(base.join("理赔规则.md"), "新规则").unwrap();
-        let rep3 = import(&ws, base.join("理赔规则.md").to_str().unwrap(), None).unwrap();
+        let rep3 = import(&ws, base.join("理赔规则.md").to_str().unwrap(), None, false).unwrap();
         assert_eq!(rep3.copied, vec!["other/理赔规则.md"]);
         assert_eq!(
             std::fs::read_to_string(ws.root.join("corpus/other/理赔规则.md")).unwrap(),
@@ -182,8 +200,23 @@ mod tests {
         );
         // 同分类再来一份不同内容的同名文件 → -2 后缀
         std::fs::write(base.join("理赔规则.md"), "第三版").unwrap();
-        let rep4 = import(&ws, base.join("理赔规则.md").to_str().unwrap(), None).unwrap();
+        let rep4 = import(&ws, base.join("理赔规则.md").to_str().unwrap(), None, false).unwrap();
         assert_eq!(rep4.copied, vec!["other/理赔规则-2.md"]);
+
+        // S8 刷新：update 模式——同名不同内容覆盖旧快照，不再堆后缀
+        std::fs::write(base.join("理赔规则.md"), "第四版").unwrap();
+        let rep5 = import(&ws, base.join("理赔规则.md").to_str().unwrap(), None, true).unwrap();
+        assert_eq!(rep5.updated, vec!["other/理赔规则.md"]);
+        assert!(rep5.copied.is_empty());
+        assert_eq!(
+            std::fs::read_to_string(ws.root.join("corpus/other/理赔规则.md")).unwrap(),
+            "第四版"
+        );
+        assert_eq!(
+            std::fs::read_to_string(ws.root.join("corpus/other/理赔规则-2.md")).unwrap(),
+            "第三版",
+            "带后缀的旧副本不属于本次刷新对象，保持不动"
+        );
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -192,18 +225,18 @@ mod tests {
         let base = std::env::temp_dir().join(format!("iw-corpus-bad-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         let ws = Workspace::create_at(&base, "bad-ws").unwrap();
-        assert!(import(&ws, "  ", None).is_err());
-        assert!(import(&ws, "/no/such/file.md", None).is_err());
-        assert!(import(&ws, "/etc", Some("bogus"))
+        assert!(import(&ws, "  ", None, false).is_err());
+        assert!(import(&ws, "/no/such/file.md", None, false).is_err());
+        assert!(import(&ws, "/etc", Some("bogus"), false)
             .unwrap_err()
             .to_string()
             .contains("bogus"));
         // 源不许是 corpus/ 自身（自拷贝）
-        assert!(import(&ws, ws.root.join("corpus").to_str().unwrap(), None).is_err());
+        assert!(import(&ws, ws.root.join("corpus").to_str().unwrap(), None, false).is_err());
         // 空目录没有可入语料
         let empty = base.join("空目录");
         std::fs::create_dir_all(&empty).unwrap();
-        assert!(import(&ws, empty.to_str().unwrap(), None).is_err());
+        assert!(import(&ws, empty.to_str().unwrap(), None, false).is_err());
         let _ = std::fs::remove_dir_all(&base);
     }
 }

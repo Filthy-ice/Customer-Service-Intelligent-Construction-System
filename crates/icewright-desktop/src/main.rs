@@ -309,8 +309,9 @@ async fn corpus_import(
     ws_id: String,
     path: String,
     cat: String,
+    update: bool,
 ) -> Result<ops::CorpusImportResult, String> {
-    tauri::async_runtime::spawn_blocking(move || ops::corpus_import(&ws_id, &path, &cat))
+    tauri::async_runtime::spawn_blocking(move || ops::corpus_import(&ws_id, &path, &cat, update))
         .await
         .map_err(|e| format!("导入任务崩溃: {e}"))?
 }

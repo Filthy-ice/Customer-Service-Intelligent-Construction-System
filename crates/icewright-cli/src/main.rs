@@ -123,7 +123,12 @@ enum CorpusAction {
         /// 目标分类（rules/apis/flows/dictionary/skills/other）；缺省 other
         #[arg(long)]
         cat: Option<String>,
+        /// 同名不同内容时覆盖旧快照（客户刷新材料后重导入刷新）；缺省加 -2 后缀共存
+        #[arg(long)]
+        update: bool,
     },
+    /// 列出已入库语料（分类/文件名 + 字节数，与桌面「需求语料」面板同一视图）
+    List { ws: String },
 }
 
 #[derive(Subcommand)]
@@ -283,13 +288,18 @@ fn cmd_ws_list() -> Result<()> {
 fn cmd_corpus(action: &CorpusAction) -> Result<()> {
     use icewright_core::corpus;
     match action {
-        CorpusAction::Add { ws, paths, cat } => {
+        CorpusAction::Add {
+            ws,
+            paths,
+            cat,
+            update,
+        } => {
             let ws = open_ws(ws)?;
             if paths.is_empty() {
                 anyhow::bail!("{}", t("corpus_add_no_paths"));
             }
             for raw in paths {
-                let rep = corpus::import(&ws, raw, cat.as_deref())?;
+                let rep = corpus::import(&ws, raw, cat.as_deref(), *update)?;
                 println!(
                     "{}",
                     tf(
@@ -297,15 +307,42 @@ fn cmd_corpus(action: &CorpusAction) -> Result<()> {
                         &[
                             ("src", raw.trim()),
                             ("n", &rep.copied.len().to_string()),
+                            ("u", &rep.updated.len().to_string()),
                             ("same", &rep.identical.to_string()),
                             ("bin", &rep.skipped_binary.to_string()),
                         ]
                     )
                 );
-                for rel in &rep.copied {
+                for rel in rep.copied.iter().chain(rep.updated.iter()) {
                     println!("  + {rel}");
                 }
             }
+        }
+        CorpusAction::List { ws } => {
+            let ws = open_ws(ws)?;
+            let corpus_dir = ws.root.join("corpus");
+            let files = icewright_core::extract::corpus_files(&ws.root)?;
+            if files.is_empty() {
+                println!("{}", tf("corpus_list_empty", &[("ws", &ws.id)]));
+                return Ok(());
+            }
+            let mut total = 0u64;
+            for p in &files {
+                let rel = p.strip_prefix(&corpus_dir).unwrap_or(p.as_path());
+                let bytes = std::fs::metadata(p).map(|m| m.len()).unwrap_or(0);
+                total += bytes;
+                println!("  {:<40} {:>9} B", rel.display(), bytes);
+            }
+            println!(
+                "{}",
+                tf(
+                    "corpus_list_total",
+                    &[
+                        ("n", &files.len().to_string()),
+                        ("bytes", &total.to_string())
+                    ]
+                )
+            );
         }
     }
     Ok(())

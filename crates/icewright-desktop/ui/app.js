@@ -69,8 +69,10 @@ var DICT = {
       corpus_add: "添加",
       corpus_path_ph: "客户文件/目录路径（绝对或 ~/ 开头），导入到所选分类",
       corpus_import: "从路径导入",
+      corpus_import_update: "覆盖同名（刷新）",
       corpus_import_busy: "导入中…",
       corpus_import_ok: "已导入 {0} 个文件到 corpus/{1}",
+      corpus_import_upd: "（{0} 个已覆盖更新）",
       corpus_import_same: "（{0} 个内容相同未重复入库）",
       corpus_import_bin: "（{0} 个非文本已跳过）",
       corpus_edit_ph: "在此编写或粘贴需求文本（markdown / 纯文本）",
@@ -174,8 +176,10 @@ var DICT = {
       corpus_add: "Add",
       corpus_path_ph: "Customer file/folder path (absolute or ~/...), imported into the selected category",
       corpus_import: "Import from path",
+      corpus_import_update: "Overwrite same-name (refresh)",
       corpus_import_busy: "Importing…",
       corpus_import_ok: "Imported {0} file(s) into corpus/{1}",
+      corpus_import_upd: "({0} overwritten with fresh content)",
       corpus_import_same: "({0} already present with identical content)",
       corpus_import_bin: "({0} non-text file(s) skipped)",
       corpus_edit_ph: "Write or paste requirement text here (markdown / plain text)",
@@ -645,10 +649,12 @@ function importCorpus() {
   var btn = $("corpus-import");
   btn.disabled = true;
   panelStatus("corpus-status", "… " + U("corpus_import_busy"));
-  invoke("corpus_import", { wsId: selected, path: p, cat: $("corpus-cat").value })
+  invoke("corpus_import", { wsId: selected, path: p, cat: $("corpus-cat").value, update: $("corpus-update").checked })
     .then(function (r) {
       $("corpus-path").value = "";
-      var msg = fmt(U("corpus_import_ok"), [String(r.copied.length), r.cat]);
+      $("corpus-update").checked = false;
+      var msg = fmt(U("corpus_import_ok"), [String(r.copied.length + r.updated.length), r.cat]);
+      if (r.updated.length) { msg += fmt(U("corpus_import_upd"), [String(r.updated.length)]); }
       if (r.identical) { msg += fmt(U("corpus_import_same"), [String(r.identical)]); }
       if (r.skipped_binary) { msg += fmt(U("corpus_import_bin"), [String(r.skipped_binary)]); }
       panelStatus("corpus-status", "✔ " + msg);

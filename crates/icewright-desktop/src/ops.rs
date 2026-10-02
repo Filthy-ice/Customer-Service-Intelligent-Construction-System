@@ -241,18 +241,25 @@ pub fn corpus_save(ws_id: &str, rel: &str, content: &str) -> Result<String, Stri
     write_file_under(&open(ws_id)?.root.join("corpus"), &rel, content)
 }
 
-/// 按路径导入客户语料的回报：分类落点 + 新增/相同/跳过计数（文案由前端 i18n 组装）。
+/// 按路径导入客户语料的回报：分类落点 + 新增/更新/相同/跳过计数（文案由前端 i18n 组装）。
 #[derive(Debug, serde::Serialize)]
 pub struct CorpusImportResult {
     pub cat: String,
     pub copied: Vec<String>,
+    pub updated: Vec<String>,
     pub identical: usize,
     pub skipped_binary: usize,
 }
 
 /// 客户材料留在原处：文件/目录按路径拷进 corpus/<分类>/ 快照。
 /// 桌面端没有"当前目录"概念：裸相对路径按用户主目录解析（绝对与 ~/ 原样交给引擎）。
-pub fn corpus_import(ws_id: &str, path: &str, cat: &str) -> Result<CorpusImportResult, String> {
+/// update=true 时同名不同内容覆盖旧快照（对应 CLI `corpus add --update`，S8 刷新用语）。
+pub fn corpus_import(
+    ws_id: &str,
+    path: &str,
+    cat: &str,
+    update: bool,
+) -> Result<CorpusImportResult, String> {
     let ws = open(ws_id)?;
     let raw = path.trim();
     if raw.is_empty() {
@@ -270,8 +277,13 @@ pub fn corpus_import(ws_id: &str, path: &str, cat: &str) -> Result<CorpusImportR
         }
     };
     let c = cat.trim();
-    let rep =
-        corpus::import(&ws, &resolved, if c.is_empty() { None } else { Some(c) }).map_err(e2s)?;
+    let rep = corpus::import(
+        &ws,
+        &resolved,
+        if c.is_empty() { None } else { Some(c) },
+        update,
+    )
+    .map_err(e2s)?;
     Ok(CorpusImportResult {
         cat: if c.is_empty() {
             corpus::DEFAULT_CAT.to_string()
@@ -279,6 +291,7 @@ pub fn corpus_import(ws_id: &str, path: &str, cat: &str) -> Result<CorpusImportR
             c.to_string()
         },
         copied: rep.copied,
+        updated: rep.updated,
         identical: rep.identical,
         skipped_binary: rep.skipped_binary,
     })
@@ -728,11 +741,11 @@ mod tests {
 
         ws_create("cimp-ws").unwrap();
         assert_eq!(
-            corpus_import("cimp-ws", "  ", "rules").unwrap_err(),
+            corpus_import("cimp-ws", "  ", "rules", false).unwrap_err(),
             "empty_path"
         );
         // 不存在的源：引擎双语报错（非稳定 code），前端原样透出
-        assert!(corpus_import("cimp-ws", "~/没有这个目录", "rules").is_err());
+        assert!(corpus_import("cimp-ws", "~/没有这个目录", "rules", false).is_err());
 
         // 客户材料留在原处：绝对路径目录、递归收集、剔除构建垃圾
         let inbox = home.join("客户材料");
@@ -740,7 +753,7 @@ mod tests {
         std::fs::write(inbox.join("理赔规则.md"), "48 小时").unwrap();
         std::fs::write(inbox.join("附件/接口清单.txt"), "POST /claim").unwrap();
         std::fs::write(inbox.join("附件/node_modules/j.js"), "junk").unwrap();
-        let r = corpus_import("cimp-ws", inbox.to_str().unwrap(), "rules").unwrap();
+        let r = corpus_import("cimp-ws", inbox.to_str().unwrap(), "rules", false).unwrap();
         assert_eq!(r.cat, "rules");
         assert_eq!(r.copied, vec!["rules/理赔规则.md", "rules/接口清单.txt"]);
         assert!(inbox.join("理赔规则.md").is_file(), "原件不许被动");
@@ -749,14 +762,28 @@ mod tests {
         assert!(list.iter().any(|f| f.rel == "rules/理赔规则.md"));
 
         // 幂等重导入：只记 identical
-        let r2 = corpus_import("cimp-ws", inbox.to_str().unwrap(), "rules").unwrap();
+        let r2 = corpus_import("cimp-ws", inbox.to_str().unwrap(), "rules", false).unwrap();
         assert!(r2.copied.is_empty() && r2.identical == 2, "{r2:?}");
 
         // 桌面端无 cwd 概念：裸相对路径按主目录解析；分类留空默认 other
         std::fs::write(home.join("话术.md"), "您好").unwrap();
-        let r3 = corpus_import("cimp-ws", "话术.md", "").unwrap();
+        let r3 = corpus_import("cimp-ws", "话术.md", "", false).unwrap();
         assert_eq!(r3.copied, vec!["other/话术.md"]);
         assert_eq!(r3.cat, "other");
+
+        // S8 刷新：勾"覆盖同名"（update=true）——同名不同内容覆盖旧快照
+        std::fs::write(inbox.join("理赔规则.md"), "48 小时内报案（修订版）").unwrap();
+        let r4 = corpus_import("cimp-ws", inbox.to_str().unwrap(), "rules", true).unwrap();
+        assert_eq!(r4.updated, vec!["rules/理赔规则.md"]);
+        assert!(r4.copied.is_empty());
+        assert_eq!(
+            corpus_read("cimp-ws", "rules/理赔规则.md").unwrap(),
+            "48 小时内报案（修订版）"
+        );
+        // 不带 update 的同名不同内容仍走 -2 后缀共存（默认不覆盖手工编辑）
+        std::fs::write(inbox.join("理赔规则.md"), "72 小时").unwrap();
+        let r5 = corpus_import("cimp-ws", inbox.to_str().unwrap(), "rules", false).unwrap();
+        assert_eq!(r5.copied, vec!["rules/理赔规则-2.md"]);
         let _ = std::fs::remove_dir_all(&home);
     }
 

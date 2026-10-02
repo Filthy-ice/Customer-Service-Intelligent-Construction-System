@@ -65,6 +65,9 @@
               </div>
               <div class="new-file">
                 <input id="corpus-path" type="text" data-i18n-ph="corpus_path_ph" />
+                <label class="mini-check" for="corpus-update" title="客户刷新材料后重导入：同名不同内容覆盖旧快照（= CLI --update）">
+                  <input id="corpus-update" type="checkbox" /><span data-i18n="corpus_import_update">覆盖同名（刷新）</span>
+                </label>
                 <button id="corpus-import" type="button" data-i18n="corpus_import">从路径导入</button>
               </div>
             </div>
