@@ -1,5 +1,7 @@
 # IceWright · 行业客服系统智能构建器
 
+中文 | [English](README.en.md)
+
 > 把行业规则、流程与需求语料交给它，它构建出一套贴合度 90–100% 的客服系统工程项目——不是拖拽式工作流引擎，而是"骨架模板 + AI 填槽 + 状态机流水线 + 人工闸门"的智能体构建器。
 
 **适用人群**：需要交付客服/理赔/工单类智能坐席系统的企业项目团队。提供 CLI 与桌面客户端两种入口。
@@ -16,8 +18,9 @@
 - **可断点续跑**：每个 workspace 独立隔离，状态机可恢复；产物任何变更自动作废已有人工确认，杜绝"批过的设计"与"生成的代码"脱节。
 - **生成历史与语料分类**：每次有状态推进（预检、提取、渲染、生成、验证、交付、两道闸门决策）自动追加到 workspace 的 `pipeline/history.jsonl`，`icewright pipeline history` 按时间回看全程；需求语料不必搬运——`icewright corpus add <ws> <文件或目录路径> [--cat 分类]`（桌面端「需求语料」页「从路径导入」）把客户原处材料拷成 `corpus/{apis|flows|dictionary|rules|skills|other}/` 分类快照，原件不动，提取时递归读取；同名同内容不重复入库，同名不同内容默认加 `-2/-3` 后缀共存，加 `--update` 则覆盖旧快照用于客户刷新材料后的 S8 重提取；`icewright corpus list` 核对入库文件与大小。
 - **自带模型接入（BYOK）**：任何 OpenAI-compatible 端点均可；供应商目录 + 在线模型发现，接入点与模型名不写死。
-- **双语界面**：构建器 CLI 文案 zh/en 可选（`workspace.locale` 或 `ICERIGHT_LOCALE`）。
-- **桌面客户端**：`icewright-desktop`（Tauri 2）实时查看各 workspace 的 S1–S8 进度、闸门状态与生成历史，并可在窗口内直接推进：初始化、预检、渲染设计、两道闸门决策、生成、验证、交付——与 CLI 走同一状态机路径，决策人记为 `desktop`；S3 提取需模型会话交互，仍走 CLI。危险操作（批准闸门）需二次点击确认。界面文案与引擎报错均中英双语：默认跟随该 workspace 的 `locale`，手动语言/主题偏好跨重启记忆。信息架构：左侧栏只放工作区列表（新建/收起），其余功能入口全部收进原生菜单栏——「文件」（刷新 F5 / 重新加载 Ctrl(Cmd)+R / 打开语料目录 / 打开生成目录 / 交付目录… / 退出）、「设置」（模型设置 `Ctrl/Cmd+,` / 界面语言 / 主题，当前生效项带勾选）、「窗口」「帮助」（关于 / GitHub）。窗口带启动淡入动画，界面深浅色可跟随系统或手动锁定；Linux 下启动时自动注册任务栏图标（不再显示默认齿轮）。模型供应商配置在「设置 → 模型设置…」：可选供应商、在线发现可用模型、写入接入点/模型名/密钥引用（只存 `env://`/`keyring://` 引用，不存密钥本体）。「需求语料」页可在窗口内新建/编辑语料，也支持「从路径导入」：客户文件/目录只给路径（绝对或 `~/` 开头，目录递归收全），拷成工作区快照、原件不动；刷新材料时勾选「覆盖同名（刷新）」即 CLI 的 `--update`。「生成项目」页的交付目录行用于生成前确认去向：S5 直接把工程生成到客户指定目录（可含 `~`），工作区只保留语料、产物、状态与日志等可复用内容，不留生成物副本；目录可继续点开查看与编辑，S8 重生成对定制文件的保护规则不变。
+- **模型操作语言（与界面语言解耦）**：发给模型的提示词（S3 提取、S6 质检裁判）与生成系统的默认回复/话术语种，由需求摄入时客户显式选定的 `workspace.model_lang` 决定——CLI `icewright corpus lang <ws> zh|en`，桌面端「需求语料」页顶部下拉选择器；管线 init/build 前为硬闸，未选定一律拒绝。它与构建器界面语言 `locale`、模型供应商国籍均无关。
+- **双语界面**：构建器 CLI 文案、引擎报错与桌面端界面均支持 zh/en（`workspace.locale` 或 `ICERIGHT_LOCALE`）；两条语言轴独立——`locale` 只管构建器自身界面，模型提示词与生成物默认语言走 `model_lang`。
+- **桌面客户端**：`icewright-desktop`（Tauri 2）实时查看各 workspace 的 S1–S8 进度、闸门状态与生成历史，并可在窗口内直接推进：初始化、预检、语料提取、渲染设计、两道闸门决策、生成、验证、交付——与 CLI 走同一状态机路径，决策人记为 `desktop`。危险操作（批准闸门）需二次点击确认。界面文案与引擎报错均中英双语：默认跟随该 workspace 的 `locale`，手动语言/主题偏好跨重启记忆。信息架构：左侧栏只放工作区列表（新建/收起），其余功能入口全部收进原生菜单栏——「文件」（刷新 F5 / 重新加载 Ctrl(Cmd)+R / 打开语料目录 / 打开生成目录 / 交付目录… / 退出）、「设置」（模型设置 `Ctrl/Cmd+,` / 界面语言 / 主题，当前生效项带勾选）、「窗口」「帮助」（关于 / GitHub）。窗口带启动淡入动画，界面深浅色可跟随系统或手动锁定；Linux 下启动时自动注册任务栏图标（不再显示默认齿轮）。模型供应商配置在「设置 → 模型设置…」：可选供应商、在线发现可用模型、写入接入点/模型名/密钥引用（只存 `env://`/`keyring://` 引用，不存密钥本体）。「需求语料」页可在窗口内新建/编辑语料，也支持「从路径导入」：客户文件/目录只给路径（绝对或 `~/` 开头，目录递归收全），拷成工作区快照、原件不动；刷新材料时勾选「覆盖同名（刷新）」即 CLI 的 `--update`。「生成项目」页的交付目录行用于生成前确认去向：S5 直接把工程生成到客户指定目录（可含 `~`），工作区只保留语料、产物、状态与日志等可复用内容，不留生成物副本；目录可继续点开查看与编辑，S8 重生成对定制文件的保护规则不变。
 
 ## 安装
 
@@ -45,6 +48,7 @@ cargo build -p icewright-desktop   # 桌面监控端（Linux 需系统依赖：l
 ```bash
 icewright ws new my-claim                          # 创建隔离 workspace
 icewright corpus add my-claim ./需求语料.md --cat rules   # 客户材料留在原处，按路径导入（目录亦可，递归收全）
+icewright corpus lang my-claim zh                  # 模型操作语言须摄入时显式选定（init 前硬闸，zh|en）
 icewright model use my-claim deepseek              # 一键配置接入点/模型/密钥引用
 icewright model probe my-claim                     # 验证端点+密钥+模型三件套
 icewright config set my-claim workspace.pack "insurance/auto-claim@0.1.0"
@@ -75,7 +79,8 @@ icewright delivery approve my-claim --by 张三       # 闸门B
 name = "my-claim"
 pack = "insurance/auto-claim@0.1.0"   # 行业包
 stack = "python"                       # python | java | go（三栈线格式一致）
-locale = "zh"                          # CLI 文案语言：zh | en（见下"界面语言"）
+locale = "zh"                          # 构建器界面语言：zh | en（见下"界面语言"）
+model_lang = "zh"                      # 模型操作语言：摄入时选定，见下"模型操作语言"
 
 [model]
 base_url = "https://api.deepseek.com/v1"
@@ -94,7 +99,11 @@ key_ref = "env://DEEPSEEK_API_KEY"     # 见下"模型接入与密钥"
 
 ### 界面语言（zh / en）
 
-构建器 CLI 输出文案支持中英切换，优先级：环境变量 `ICERIGHT_LOCALE`（临时覆盖）> `workspace.locale`（持久，默认 zh）；`icewright config set <ws> workspace.locale en` 即时生效（该条输出即用新语言）。clap 帮助文案同样双语——`--help` 在参数解析前打印，故帮助语言只看 `ICERIGHT_LOCALE=en`；英文表与命令树由单测双向对账，漏译即 CI 失败。生成出来的客服系统前端语言不在此列——它自带聊天页面（`GET /`），访客在页面右上角选择 zh/en，固定话术与模型回复都跟随所选语言，未知语言回退 zh。引擎内部报错同样双语：CLI 在 `ICERIGHT_LOCALE` / `workspace.locale` 切换时一并生效，桌面客户端每次操作前按 workspace 语种同步；英文表与源码取词点由单测双向对账，漏译即 CI 失败。
+构建器 CLI 输出文案支持中英切换，优先级：环境变量 `ICERIGHT_LOCALE`（临时覆盖）> `workspace.locale`（持久，默认 zh）；`icewright config set <ws> workspace.locale en` 即时生效（该条输出即用新语言）。clap 帮助文案同样双语——`--help` 在参数解析前打印，故帮助语言只看 `ICERIGHT_LOCALE=en`；英文表与命令树由单测双向对账，漏译即 CI 失败。引擎内部报错同样双语：CLI 在 `ICERIGHT_LOCALE` / `workspace.locale` 切换时一并生效，桌面客户端每次操作前按 workspace 语种同步；英文表与源码取词点由单测双向对账，漏译即 CI 失败。注意：`locale` 只管构建器自身界面，不决定发给模型的提示词语言。
+
+### 模型操作语言（zh / en）
+
+`workspace.model_lang` 决定两件事：① S3 领域提取与 S6 质检裁判发给模型的全部提示词语种；② 生成客服系统的默认回复/话术语种（访客仍可在聊天页右上角切换 zh/en，未知语言回退该默认值）。由客户在需求摄入时显式选定：CLI `icewright corpus lang <ws> zh|en`（不带值则查看当前值），桌面端在「需求语料」页顶部下拉选择器即时保存。`pipeline init` 与 `build` 处为硬闸——未选定一律拒绝，不给隐式默认。它与供应商国籍无关（国产模型对外国团队、海外模型对中国团队都按操作者语言出稿），也与 `locale` 解耦（可以英文界面操作、中文提示词出稿）。`model_lang` 计入 S5 输入哈希，改动即自动作废下游闸门、触发重生成。
 
 ### 模型接入与密钥（BYOK）
 
