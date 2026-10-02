@@ -15,11 +15,13 @@
 - **生成历史与语料分类**：每次有状态推进（预检、提取、渲染、生成、验证、交付、两道闸门决策）自动追加到 workspace 的 `pipeline/history.jsonl`，`icewright pipeline history` 按时间回看全程；需求语料按 `corpus/{apis|flows|dictionary|rules|skills|other}/` 分类子目录投放，提取时递归读取。
 - **自带模型接入（BYOK）**：任何 OpenAI-compatible 端点均可；供应商目录 + 在线模型发现，接入点与模型名不写死。
 - **双语界面**：构建器 CLI 文案 zh/en 可选（`workspace.locale` 或 `ICERIGHT_LOCALE`）。
+- **桌面监控端**：`icewright-desktop`（Tauri 2）实时查看各 workspace 的 S1–S8 进度、闸门状态与生成历史；只读监控，推进操作仍走 CLI。
 
 ## 安装
 
 ```bash
 cargo build --release        # 产物 target/release/icewright
+cargo build -p icewright-desktop   # 桌面监控端（Linux 需系统依赖：libwebkit2gtk-4.1-dev librsvg2-dev libxdo-dev libssl-dev）
 ```
 
 ## 快速开始

@@ -1,0 +1,17 @@
+[package]
+name = "icewright-desktop"
+description = "IceWright desktop client: pipeline monitoring and generation history"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+icewright-core = { path = "../icewright-core" }
+tauri = { version = "2", features = [] }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }

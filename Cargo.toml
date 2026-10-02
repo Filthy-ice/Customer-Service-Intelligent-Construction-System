@@ -4,6 +4,7 @@ members = [
     "crates/icewright-core",
     "crates/icewright-artifact",
     "crates/icewright-cli",
+    "crates/icewright-desktop",
 ]
 
 [workspace.package]
