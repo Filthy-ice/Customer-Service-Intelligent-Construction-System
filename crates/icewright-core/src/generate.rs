@@ -138,6 +138,14 @@ static TEMPLATES_JAVA: &[(&str, &str)] = &[
         include_str!("../templates/java/src/main/resources/static/index.html"),
     ),
     (
+        "src/main/resources/static/admin.html",
+        include_str!("../templates/java/src/main/resources/static/admin.html"),
+    ),
+    (
+        "src/main/resources/static/console.html",
+        include_str!("../templates/java/src/main/resources/static/console.html"),
+    ),
+    (
         "src/main/java/com/icewright/generated/IcewrightApplication.java",
         include_str!("../templates/java/src/main/java/com/icewright/generated/IcewrightApplication.java"),
     ),
@@ -154,6 +162,14 @@ static TEMPLATES_JAVA: &[(&str, &str)] = &[
         include_str!("../templates/java/src/main/java/com/icewright/generated/api/HealthController.java"),
     ),
     (
+        "src/main/java/com/icewright/generated/api/PageController.java",
+        include_str!("../templates/java/src/main/java/com/icewright/generated/api/PageController.java"),
+    ),
+    (
+        "src/main/java/com/icewright/generated/api/OverviewController.java",
+        include_str!("../templates/java/src/main/java/com/icewright/generated/api/OverviewController.java"),
+    ),
+    (
         "src/main/java/com/icewright/generated/api/dto/ChatRequest.java",
         include_str!("../templates/java/src/main/java/com/icewright/generated/api/dto/ChatRequest.java"),
     ),
@@ -164,6 +180,18 @@ static TEMPLATES_JAVA: &[(&str, &str)] = &[
     (
         "src/main/java/com/icewright/generated/api/dto/HealthResponse.java",
         include_str!("../templates/java/src/main/java/com/icewright/generated/api/dto/HealthResponse.java"),
+    ),
+    (
+        "src/main/java/com/icewright/generated/api/dto/SessionDetailResponse.java",
+        include_str!("../templates/java/src/main/java/com/icewright/generated/api/dto/SessionDetailResponse.java"),
+    ),
+    (
+        "src/main/java/com/icewright/generated/api/dto/AdminOverviewResponse.java",
+        include_str!("../templates/java/src/main/java/com/icewright/generated/api/dto/AdminOverviewResponse.java"),
+    ),
+    (
+        "src/main/java/com/icewright/generated/api/dto/ConsoleSessionRow.java",
+        include_str!("../templates/java/src/main/java/com/icewright/generated/api/dto/ConsoleSessionRow.java"),
     ),
     (
         "src/main/java/com/icewright/generated/service/SessionService.java",
@@ -180,6 +208,10 @@ static TEMPLATES_JAVA: &[(&str, &str)] = &[
     (
         "src/main/java/com/icewright/generated/domain/SkillsRegistry.java",
         include_str!("../templates/java/src/main/java/com/icewright/generated/domain/SkillsRegistry.java"),
+    ),
+    (
+        "src/main/java/com/icewright/generated/domain/ApisRegistry.java",
+        include_str!("../templates/java/src/main/java/com/icewright/generated/domain/ApisRegistry.java"),
     ),
     (
         "src/main/java/com/icewright/generated/domain/I18n.java",

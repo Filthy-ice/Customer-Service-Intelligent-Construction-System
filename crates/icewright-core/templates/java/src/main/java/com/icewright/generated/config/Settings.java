@@ -13,6 +13,8 @@ public final class Settings {
 
     public static final String PROJECT = "{{project_name}}";
     public static final String PACK_REF = "{{pack_ref}}";
+    /** 业务人员后台页开关（闸门A 设计项，编译期写入；调试页与开发后台始终必含）。 */
+    public static final boolean BUSINESS_CONSOLE = "{{business_console}}".equals("true");
 
     public static final String REDIS_HOST = env("IW_REDIS_HOST", "127.0.0.1");
     public static final int REDIS_PORT = Integer.parseInt(env("IW_REDIS_PORT", "6379"));
@@ -28,6 +30,13 @@ public final class Settings {
     private static String env(String name, String fallback) {
         String raw = System.getenv(name);
         return raw == null || raw.isEmpty() ? fallback : raw;
+    }
+
+    /** 开发后台运行态展示用：仅报告三项 IW_MODEL_* 是否齐备，不读取也不暴露取值。 */
+    public static boolean modelConfigured() {
+        return !System.getenv().getOrDefault("IW_MODEL_BASE_URL", "").isEmpty()
+            && !System.getenv().getOrDefault("IW_MODEL_NAME", "").isEmpty()
+            && !System.getenv().getOrDefault("IW_MODEL_API_KEY", "").isEmpty();
     }
 
     private Settings() {

@@ -113,6 +113,10 @@ public class ChatService {
         String reply = hitRuleId.isEmpty()
             ? I18n.t(replyKey, lang)
             : I18n.t(replyKey, lang, Map.of(RULE_PARAM, hitRuleId));
+        if (!hitRuleId.isEmpty()) {
+            // 短路命中的会话打标，供业务后台 /console 列出待人工关注（只标规则 id，不存业务数据）
+            sessionService.mergeSlots(sessionId, Map.of("flagged", hitRuleId));
+        }
         return new Reply(sessionId, reply, matchedIds, lang);
     }
 

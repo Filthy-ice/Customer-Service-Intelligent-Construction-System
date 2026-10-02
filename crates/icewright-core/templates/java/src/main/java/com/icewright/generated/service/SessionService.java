@@ -9,10 +9,14 @@ import org.springframework.stereotype.Service;
 import redis.clients.jedis.DefaultJedisClientConfig;
 import redis.clients.jedis.HostAndPort;
 import redis.clients.jedis.JedisPooled;
+import redis.clients.jedis.params.ScanParams;
 import redis.clients.jedis.params.SetParams;
+import redis.clients.jedis.resps.ScanResult;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -87,6 +91,29 @@ public class SessionService {
         slots.putAll(patch);
         saveSlots(sessionId, slots);
         return slots;
+    }
+
+    /**
+     * 枚举本项目全部会话槽位（SCAN 非 KEYS，不阻塞 Redis）；只读，不落业务数据。
+     *
+     * @return 每项为 {session_id, slots} 的有序 Map
+     */
+    public List<Map<String, Object>> listSessions() {
+        String prefix = String.format(KEY_TEMPLATE, Settings.PROJECT, "");
+        List<Map<String, Object>> out = new ArrayList<>();
+        String cursor = ScanParams.SCAN_POINTER_START;
+        do {
+            ScanResult<String> page = jedis.scan(cursor, new ScanParams().match(prefix + "*").count(100));
+            for (String key : page.getResult()) {
+                String sessionId = key.substring(prefix.length());
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("session_id", sessionId);
+                row.put("slots", loadSlots(sessionId));
+                out.add(row);
+            }
+            cursor = page.getCursor();
+        } while (!ScanParams.SCAN_POINTER_START.equals(cursor));
+        return out;
     }
 
     @PreDestroy
